@@ -101,3 +101,7 @@ ROLE_PERMISSIONS: dict[RoleEnum, frozenset[PermissionEnum]] = {
         }
     ),
 }
+
+
+class CacheKeyConstants:
+    CATEGORY_LIST_PREFIX = "categories:list"

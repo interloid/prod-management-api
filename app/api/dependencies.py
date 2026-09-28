@@ -15,6 +15,7 @@ from app.exceptions.custom import UnauthorizedException
 from app.models.user_model import User
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
+from app.services.cache_service import CacheService
 from app.services.product_service import ProductService
 
 bearer_schema = HTTPBearer(
@@ -22,6 +23,12 @@ bearer_schema = HTTPBearer(
     description="Enter the JWT access token",
     auto_error=False,
 )
+
+
+async def get_cache_service(
+    redis: Redis = Depends(get_redis),
+) -> CacheService:
+    return CacheService(redis)
 
 
 def get_arq_pool(request: Request) -> ArqRedis:
