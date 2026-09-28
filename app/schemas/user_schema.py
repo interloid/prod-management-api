@@ -2,7 +2,7 @@ from uuid import UUID
 
 from pydantic import EmailStr, Field
 
-from app.core.constants import RoleEnum
+from app.core.constants import PermissionEnum, RoleEnum
 from app.schemas.common import BaseSchema
 
 
@@ -19,5 +19,7 @@ class UserResponse(UserBase):
     email: EmailStr
     first_name: str
     last_name: str
+    avatar_url: str | None = None
     is_active: bool
     role: RoleEnum
+    permissions: list[PermissionEnum]
