@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Cookie, Depends, Response, status
 
 from app.api.dependencies import get_auth_service, get_current_user
+from app.core.constants import ROLE_PERMISSIONS, RoleEnum
+from app.core.cookies import set_access_cookie
 from app.core.settings import settings
 from app.exceptions.global_exception import AUTH_ERROR_RESPONSES
 from app.models.user_model import User
@@ -25,15 +27,7 @@ def set_cookie(
     refresh_max_age: int,
 ) -> None:
 
-    response.set_cookie(
-        key=settings.ACCESS_TOKEN_COOKIE_NAME,
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
+    set_access_cookie(response, access_token)
 
     response.set_cookie(
         key=settings.REFRESH_TOKEN_COOKIE_NAME,
@@ -163,6 +157,11 @@ async def logout_all_devices(
 async def get_current_user_details(
     current_user: User = Depends(get_current_user),
 ):
+    role = RoleEnum(current_user.role)
+    permissions = sorted(
+        ROLE_PERMISSIONS[role], key=lambda permission: permission.value
+    )
+
     return ApiResponse[UserResponse](
         message="Current user retrieved successfully",
         data=UserResponse(
@@ -172,6 +171,7 @@ async def get_current_user_details(
             last_name=current_user.last_name,
             avatar_url=current_user.avatar_url,
             is_active=current_user.is_active,
-            role=current_user.role,
+            role=role,
+            permissions=permissions,
         ),
     )

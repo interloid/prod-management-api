@@ -212,17 +212,13 @@ pytest --cov=app
 The application uses JWT access tokens and opaque refresh tokens.
 
 After successful login, the backend:
-- Returns a short-lived JWT access token.
-- Sets the opaque refresh token as a secure, HTTP-only cookie.
+- Sets the short-lived JWT access token and opaque refresh token as secure, HTTP-only cookies.
 - Stores only the refresh token’s hash in PostgreSQL.
 
 The frontend must send credentials with requests:
 
 ```javascript
 fetch(url, {
-  headers: {
-    Authorization: `Bearer ${accessToken}`,
-  },
   credentials: "include",
 });
 ```

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.s3 import S3Service, get_s3_service
 from app.core.security import decode_token, validate_access_token_payload
+from app.core.settings import settings
 from app.db.redis import get_redis
 from app.db.session import get_db
 from app.exceptions.custom import UnauthorizedException
@@ -48,27 +49,40 @@ def get_product_service(
 
 
 async def get_current_user(
-    access_token: str | None = Cookie(default=None, alias="access_token"),
+    request: Request,
+    access_token: str | None = Cookie(
+        default=None,
+        alias=settings.ACCESS_TOKEN_COOKIE_NAME,
+    ),
+    refresh_token: str | None = Cookie(
+        default=None,
+        alias=settings.REFRESH_TOKEN_COOKIE_NAME,
+    ),
     db: AsyncSession = Depends(get_db),
+    service: AuthService = Depends(get_auth_service),
 ) -> User:
 
-    if access_token is None:
+    if access_token is not None:
+        try:
+            token_payload = validate_access_token_payload(decode_token(access_token))
+
+        except ExpiredSignatureError as exc:
+            if refresh_token is None:
+                raise UnauthorizedException(message="Invalid access token") from exc
+
+        except (ValidationError, ValueError, InvalidTokenError) as exc:
+            raise UnauthorizedException(message="Invalid access token") from exc
+
+        else:
+            user = await UserRepository(db).get_by_id(token_payload.sub)
+            if user is None or not user.is_active:
+                raise UnauthorizedException(message="Invalid access token")
+            return user
+
+    if refresh_token is None:
         raise UnauthorizedException(message="Authentication required")
 
-    try:
-        decode_payload = decode_token(access_token)
+    user, renewed_access_token = await service.renew_access_token(refresh_token)
 
-        token_payload = validate_access_token_payload(decode_payload)
-
-    except ExpiredSignatureError as exc:
-        raise UnauthorizedException(message="Invalid access token") from exc
-
-    except (ValidationError, ValueError, InvalidTokenError) as exc:
-        raise UnauthorizedException(message="Invalid access token") from exc
-
-    user = await UserRepository(db).get_by_id(token_payload.sub)
-
-    if user is None or not user.is_active:
-        raise UnauthorizedException(message="Invalid access token")
-
+    request.state.renewed_access_token = renewed_access_token
     return user

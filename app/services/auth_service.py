@@ -178,6 +178,30 @@ class AuthService:
         await self.db.commit()
         raise UnauthorizedException(message="Invalid refresh token")
 
+    async def renew_access_token(self, raw_refresh_token: str) -> tuple[User, str]:
+
+        stored_token = await self.refresh_token_repo.get_by_token_hash(
+            hash_refresh_token(raw_refresh_token)
+        )
+
+        if stored_token is None:
+            raise UnauthorizedException(message="Invalid refresh token")
+
+        if stored_token.expires_at <= utc_now():
+            raise UnauthorizedException(message="Refresh token has expired")
+
+        if stored_token.is_revoked:
+            await self._handle_refresh_token(stored_token)
+
+        user = await self.user_repo.get_by_id(stored_token.user_id)
+
+        if user is None or not user.is_active:
+            await self.refresh_token_repo.revoke_all_for_user(stored_token.user_id)
+            await self.db.commit()
+            raise UnauthorizedException(message="Invalid refresh token")
+
+        return user, create_access_token({"sub": str(user.id)})
+
     async def refresh_token(
         self,
         raw_refresh_token: str | None,

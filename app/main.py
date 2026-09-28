@@ -7,6 +7,7 @@ from app.core.lifespan import lifespan
 from app.core.logging import setup_logging
 from app.core.settings import settings
 from app.exceptions.handlers import register_exception_handlers
+from app.middleware.auth_cookie_middleware import AuthCookieMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 
 setup_logging()
@@ -27,6 +28,7 @@ cors_origins = [
     if origin.strip()
 ]
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(AuthCookieMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
