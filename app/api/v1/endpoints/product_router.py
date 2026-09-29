@@ -2,13 +2,29 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.exceptions import RequestValidationError
 from pydantic import TypeAdapter, ValidationError
 
 from app.api.authorization import require_permission
-from app.api.dependencies import get_product_service
-from app.core.constants import PaginationEnum, PermissionEnum, ProductStatusEnum
+from app.api.dependencies import get_cache_service, get_product_service
+from app.core.constants import (
+    CacheKeyConstants,
+    PaginationEnum,
+    PermissionEnum,
+    ProductStatusEnum,
+)
+from app.core.logging import get_logger
 from app.core.s3 import S3Service, get_s3_service
 from app.exceptions.custom import BadRequestException
 from app.exceptions.global_exception import CRUD_ERROR_RESPONSES
@@ -24,7 +40,12 @@ from app.schemas.response import (
     PaginatedResponse,
     PaginationMeta,
 )
+from app.services.cache_service import CacheService
 from app.services.product_service import ProductService
+from app.utils.cache_key import build_product_cache_key, build_product_list_cache_key
+from app.utils.etag import generate_etag
+
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/products",
@@ -201,10 +222,42 @@ async def list_products(
         le=PaginationEnum.MAX_PAGE_SIZE,
     ),
     product_service: ProductService = Depends(get_product_service),
+    cache: CacheService = Depends(get_cache_service),
     s3_service: S3Service = Depends(get_s3_service),
 ) -> PaginatedResponse[ProductResponse]:
+
+    if min_price is not None and max_price is not None and min_price > max_price:
+        logger.warning(
+            "Minimum price cannot be greater than maximum price | "
+            "min_price=%s | max_price=%s",
+            min_price,
+            max_price,
+        )
+        raise BadRequestException(
+            message="Minimum price cannot be greater than maximum price",
+        )
+
+    cached_key = build_product_list_cache_key(
+        search=search.strip() if search else None,
+        category_name=category_name,
+        status=status_filter.value if status_filter else None,
+        min_price=str(min_price) if min_price is not None else None,
+        max_price=str(max_price) if max_price is not None else None,
+        in_stock=in_stock,
+        sort_by=sort,
+        sort_order=order,
+        page=page,
+        page_size=page_size,
+    )
+
+    cached_data = await cache.get_json(cached_key)
+
+    if cached_data is not None:
+        logger.info("product list cached data", extra={"cached_key": cached_key})
+        return PaginatedResponse[ProductResponse](**cached_data)
+
     products, total = await product_service.list_products(
-        search=search,
+        search=search.strip() if search else None,
         category_name=category_name,
         status=status_filter,
         min_price=min_price,
@@ -226,7 +279,7 @@ async def list_products(
         page_size=page_size,
     )
 
-    return PaginatedResponse(
+    response = PaginatedResponse(
         message="Products retrieved successfully",
         data=items,
         pagination=PaginationMeta(
@@ -236,6 +289,19 @@ async def list_products(
             total_pages=total_pages,
         ),
     )
+
+    await cache.set_json(
+        key=cached_key,
+        value=response.model_dump(mode="json"),
+        ttl=60,
+    )
+
+    await cache.add_to_set(
+        key=CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS,
+        value=cached_key,
+    )
+
+    return response
 
 
 @router.get(
@@ -247,20 +313,58 @@ async def list_products(
 )
 async def get_product(
     id: UUID,
+    http_response: Response,
+    if_none_match: str | None = Header(default=None),
     product_service: ProductService = Depends(get_product_service),
     s3_service: S3Service = Depends(get_s3_service),
+    cache: CacheService = Depends(get_cache_service),
 ) -> ApiResponse[ProductResponse]:
+
+    cached_key = build_product_cache_key(id=id)
+
+    cached_data = await cache.get_json(cached_key)
+
+    if cached_data is not None:
+        logger.info("product cached data", extra={"cached_key": cached_key})
+        cached_etag = generate_etag(cached_data)
+
+        http_response.headers["ETag"] = cached_etag
+
+        if if_none_match == cached_etag:
+            http_response.status_code = status.HTTP_304_NOT_MODIFIED
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
+        return ApiResponse[ProductResponse](**cached_data)
+
     product = await product_service.get_product(
         product_id=id,
     )
 
-    return ApiResponse(
+    response = ApiResponse(
         message="Product retrieved successfully",
         data=await to_product_response(
             product=product,
             s3_service=s3_service,
         ),
     )
+
+    response_json = response.model_dump(mode="json")
+
+    etag = generate_etag(response_json)
+
+    await cache.set_json(
+        key=cached_key,
+        value=response_json,
+        ttl=300,
+    )
+
+    http_response.headers["ETag"] = etag
+
+    if if_none_match == etag:
+        http_response.status_code = status.HTTP_304_NOT_MODIFIED
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
+    return response
 
 
 removed_image_ids_adapter = TypeAdapter(list[UUID])

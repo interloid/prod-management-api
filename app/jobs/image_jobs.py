@@ -5,7 +5,7 @@ from arq import Retry
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.core.constants import ProductImageConstants
+from app.core.constants import CacheKeyConstants, ProductImageConstants
 from app.core.logging import get_logger
 from app.core.settings import settings
 from app.models.product_image_model import ProductImage
@@ -80,6 +80,9 @@ async def upload_product_images(
     product_id: str,
     images: list[dict[str, Any]],
 ) -> dict[str, Any]:
+
+    redis = ctx["redis"]
+
     if not images:
         return {
             "product_id": product_id,
@@ -357,6 +360,22 @@ async def upload_product_images(
                         await image_repo.set_primary(
                             image=selected_image,
                         )
+                product_cache_key = (
+                    f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}{product_uuid}"
+                )
+
+                await redis.delete(product_cache_key)
+
+                keys = await redis.smembers(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+
+                if keys:
+                    keys = [
+                        key.decode() if isinstance(key, bytes) else key for key in keys
+                    ]
+
+                    await redis.delete(*keys)
+
+                    await redis.delete(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
 
         return {
             "product_id": str(product_uuid),

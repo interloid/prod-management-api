@@ -40,7 +40,7 @@ class CategoryService(BaseService[Category]):
         cached_data = await self.cache.get_json(cached_key)
 
         if cached_data is not None:
-            logger.warning("Cached data", extra={"cached_key": cached_key})
+            logger.warning("categories cached data", extra={"cached_key": cached_key})
             return PaginatedResponse[CategoryResponse](**cached_data)
 
         category_stmt = self.category_repo.get_all(search=search)

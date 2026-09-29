@@ -1,10 +1,12 @@
 import json
 from typing import Any
+from uuid import UUID
 
 from fastapi.encoders import jsonable_encoder
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from app.core.constants import CacheKeyConstants
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,3 +60,38 @@ class CacheService:
                 "Redis cache delete failed", extra={"cached_key": list(keys)}
             )
             return None
+
+    async def delete_by_pattern(self, pattern: str) -> None:
+        try:
+            keys = []
+
+            async for key in self.redis.scan_iter(match=pattern):
+                keys.append(key)
+
+            if keys:
+                await self.delete_keys(*keys)
+
+        except RedisError:
+            logger.warning(
+                "Redis cache pattern delete failed",
+                extra={"pattern": pattern},
+            )
+
+    async def invalidate_product_list_cache(self) -> None:
+        keys = await self.redis.smembers(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+
+        if not keys:
+            return
+
+        keys = [key.decode() if isinstance(key, bytes) else key for key in keys]
+
+        await self.delete_keys(*keys)
+        await self.delete_keys(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+
+    async def invalidate_product_cache(self, id: UUID) -> None:
+        key = f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}{id}"
+
+        await self.delete_keys(key)
+
+    async def add_to_set(self, key: str, value: str) -> None:
+        await self.redis.sadd(key, value)

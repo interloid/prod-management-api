@@ -47,11 +47,13 @@ def get_product_service(
     db: AsyncSession = Depends(get_db),
     s3_service: S3Service = Depends(get_s3_service),
     arq_pool: ArqRedis = Depends(get_arq_pool),
+    cache: CacheService = Depends(get_cache_service),
 ) -> ProductService:
     return ProductService(
         db=db,
         s3_service=s3_service,
         arq_pool=arq_pool,
+        cache=cache,
     )
 
 
