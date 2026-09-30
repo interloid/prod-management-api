@@ -25,6 +25,7 @@ from app.core.constants import (
     ProductStatusEnum,
 )
 from app.core.logging import get_logger
+from app.core.rate_limiter import enforce_read_rate_limit, enforce_write_rate_limit
 from app.core.s3 import S3Service, get_s3_service
 from app.exceptions.custom import BadRequestException
 from app.exceptions.global_exception import CRUD_ERROR_RESPONSES
@@ -128,7 +129,10 @@ async def to_product_response(
 
 @router.post(
     "",
-    dependencies=[Depends(require_permission(PermissionEnum.CREATE_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.CREATE_PRODUCTS)),
+        Depends(enforce_write_rate_limit),
+    ],
     response_model=ApiResponse[ProductResponse],
     status_code=status.HTTP_201_CREATED,
     responses=CRUD_ERROR_RESPONSES,
@@ -171,7 +175,10 @@ async def create_product(
 
 @router.get(
     "",
-    dependencies=[Depends(require_permission(PermissionEnum.VIEW_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.VIEW_PRODUCTS)),
+        Depends(enforce_read_rate_limit),
+    ],
     response_model=PaginatedResponse[ProductResponse],
     status_code=status.HTTP_200_OK,
     responses=CRUD_ERROR_RESPONSES,
@@ -306,7 +313,10 @@ async def list_products(
 
 @router.get(
     "/{id}",
-    dependencies=[Depends(require_permission(PermissionEnum.VIEW_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.VIEW_PRODUCTS)),
+        Depends(enforce_read_rate_limit),
+    ],
     response_model=ApiResponse[ProductResponse],
     status_code=status.HTTP_200_OK,
     responses=CRUD_ERROR_RESPONSES,
@@ -399,7 +409,10 @@ def parse_removed_image_ids(
 
 @router.patch(
     "/{id}",
-    dependencies=[Depends(require_permission(PermissionEnum.UPDATE_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.UPDATE_PRODUCTS)),
+        Depends(enforce_write_rate_limit),
+    ],
     response_model=ApiResponse[ProductResponse],
     status_code=status.HTTP_200_OK,
     responses=CRUD_ERROR_RESPONSES,
@@ -472,7 +485,10 @@ async def update_product(
 
 @router.delete(
     "/{id}",
-    dependencies=[Depends(require_permission(PermissionEnum.DELETE_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.DELETE_PRODUCTS)),
+        Depends(enforce_write_rate_limit),
+    ],
     status_code=status.HTTP_204_NO_CONTENT,
     responses=CRUD_ERROR_RESPONSES,
 )

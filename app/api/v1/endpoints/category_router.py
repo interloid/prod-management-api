@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.authorization import require_permission
 from app.api.dependencies import get_cache_service
 from app.core.constants import PaginationEnum, PermissionEnum
+from app.core.rate_limiter import enforce_read_rate_limit
 from app.db.session import get_db
 from app.exceptions.global_exception import CRUD_ERROR_RESPONSES
 from app.schemas.category_schema import CategoryResponse
@@ -19,7 +20,10 @@ router = APIRouter(
 
 @router.get(
     "",
-    dependencies=[Depends(require_permission(PermissionEnum.VIEW_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.VIEW_PRODUCTS)),
+        Depends(enforce_read_rate_limit),
+    ],
     response_model=PaginatedResponse[CategoryResponse],
     status_code=status.HTTP_200_OK,
     responses=CRUD_ERROR_RESPONSES,

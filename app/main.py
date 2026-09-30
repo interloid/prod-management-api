@@ -1,16 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
 
 from app.api.router import router as api_router
 from app.core import config
 from app.core.lifespan import lifespan
 from app.core.logging import setup_logging
+from app.core.rate_limiter import limiter
 from app.core.settings import settings
+from app.exceptions.custom import rate_limit_exception_handler
 from app.exceptions.handlers import register_exception_handlers
 from app.middleware.auth_cookie_middleware import AuthCookieMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 
 setup_logging()
+
 
 app = FastAPI(
     title=config.PROJECT_NAME,
@@ -20,6 +24,12 @@ app = FastAPI(
     redoc_url=config.REDOC_URL if settings.DEBUG else None,
     openapi_url="/openapi.json" if settings.DEBUG else None,
     lifespan=lifespan,
+)
+
+app.state.limiter = limiter
+app.add_exception_handler(
+    RateLimitExceeded,
+    rate_limit_exception_handler,
 )
 
 cors_origins = [

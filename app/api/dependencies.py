@@ -86,6 +86,7 @@ async def get_current_user(
             user = await UserRepository(db).get_by_id(token_payload.sub)
             if user is None or not user.is_active:
                 raise UnauthorizedException(message="Invalid access token")
+            request.state.rate_limit_user_id = str(user.id)
             return user
 
     if refresh_token is None:
@@ -94,4 +95,5 @@ async def get_current_user(
     user, renewed_access_token = await service.renew_access_token(refresh_token)
 
     request.state.renewed_access_token = renewed_access_token
+    request.state.rate_limit_user_id = str(user.id)
     return user

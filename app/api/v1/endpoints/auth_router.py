@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Cookie, Depends, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 
 from app.api.dependencies import get_auth_service, get_current_user
 from app.core.constants import ROLE_PERMISSIONS, RoleEnum
 from app.core.cookies import set_access_cookie
+from app.core.rate_limiter import enforce_read_rate_limit, limiter
 from app.core.settings import settings
 from app.exceptions.global_exception import AUTH_ERROR_RESPONSES
 from app.models.user_model import User
@@ -64,7 +65,9 @@ def delete_cookie(response: Response) -> None:
     response_model=ApiResponse[None],
     responses=AUTH_ERROR_RESPONSES,
 )
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     login_data: LoginRequest,
     response: Response,
     service: AuthService = Depends(get_auth_service),
@@ -151,6 +154,7 @@ async def logout_all_devices(
 
 @router.get(
     "/me",
+    dependencies=[Depends(enforce_read_rate_limit)],
     response_model=ApiResponse[UserResponse],
     responses=AUTH_ERROR_RESPONSES,
 )
