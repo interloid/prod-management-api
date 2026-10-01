@@ -9,6 +9,7 @@ from fastapi import (
     Form,
     Header,
     Query,
+    Request,
     Response,
     UploadFile,
     status,
@@ -138,6 +139,7 @@ async def to_product_response(
     responses=CRUD_ERROR_RESPONSES,
 )
 async def create_product(
+    request: Request,
     name: Annotated[str, Form(...)],
     sku: Annotated[str, Form(...)],
     category_name: Annotated[str, Form(...)],
@@ -165,9 +167,12 @@ async def create_product(
             exc.errors(),
         ) from exc
 
+    request_id = request.state.request_id
+
     await product_service.create_product(
         payload=payload,
         images=images or [],
+        request_id=request_id,
     )
 
     return ApiResponse(message="Product created successfully")

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -13,9 +14,11 @@ from app.repositories.product_image_repo import (
     ProductImageRepository,
 )
 from app.repositories.product_repo import ProductRepository
+from app.schemas.event import EventEnvelope
 from app.schemas.image_jobs_schema import (
     ProductImageUploadPayload,
 )
+from app.services.event_service import EventService
 
 logger = get_logger(__name__)
 
@@ -52,7 +55,6 @@ def _extract_staging_object_keys(
         if isinstance(staging_key, str) and staging_key.startswith(expected_prefix):
             staging_object_keys.append(staging_key)
 
-    # Remove duplicates while preserving order.
     return list(dict.fromkeys(staging_object_keys))
 
 
@@ -79,9 +81,19 @@ async def upload_product_images(
     ctx: dict[str, Any],
     product_id: str,
     images: list[dict[str, Any]],
+    request_id: str,
 ) -> dict[str, Any]:
 
+    logger.info(
+        "upload_product_images START | product_id=%s | images=%s | request_id=%s",
+        product_id,
+        images,
+        request_id,
+    )
+
     redis = ctx["redis"]
+
+    event_service = EventService(redis)
 
     if not images:
         return {
@@ -377,6 +389,17 @@ async def upload_product_images(
 
                     await redis.delete(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
 
+        await event_service.publish(
+            EventEnvelope(
+                event="image.processed",
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product_uuid),
+                    "image_ids": processed_image_ids,
+                },
+            ),
+        )
         return {
             "product_id": str(product_uuid),
             "uploaded": len(

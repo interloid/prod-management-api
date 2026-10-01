@@ -185,7 +185,7 @@ class ProductService(BaseService[Product]):
         return content_hashes
 
     async def create_product(
-        self, payload: ProductCreate, images: list[UploadFile]
+        self, payload: ProductCreate, images: list[UploadFile], request_id: str
     ) -> Product:
 
         await self._validate_product_images(images)
@@ -280,6 +280,7 @@ class ProductService(BaseService[Product]):
                 "upload_product_images",
                 str(product.id),
                 [image.model_dump(mode="json") for image in job_images],
+                request_id=str(request_id),
                 _expires=86_400,
             )
 

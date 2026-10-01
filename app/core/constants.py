@@ -111,3 +111,7 @@ class CacheKeyConstants:
     PRODUCT_LIST_CACHE_KEYS = "product:list:keys"
 
     PRODUCT_CACHE_PREFIX = "product:"
+
+
+class EventChannelConstants:
+    SSE_EVENTS_CHANNEL = "pms:sse:events"
