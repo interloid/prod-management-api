@@ -16,7 +16,6 @@ class SSEConnectionManager:
         self.connections.discard(queue)
 
     async def broadcast(self, event: Any) -> None:
-        print("Active connections:", len(self.connections))
         for queue in self.connections.copy():
             await queue.put(event)
 

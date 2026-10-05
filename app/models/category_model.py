@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import BaseEntity
@@ -16,6 +16,16 @@ class Category(BaseEntity):
         String(50),
         unique=True,
         nullable=False,
+    )
+
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    avatar_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     products: Mapped[list["Product"]] = relationship(

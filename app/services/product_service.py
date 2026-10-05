@@ -1,17 +1,19 @@
 import asyncio
 import hashlib
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from arq.connections import ArqRedis
 from fastapi import UploadFile
+from redis.asyncio import Redis
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import (
-    CacheKeyConstants,
+    EventType,
     ProductImageConstants,
     ProductStatusEnum,
 )
@@ -26,11 +28,13 @@ from app.models.product_model import Product
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.product_image_repo import ProductImageRepository
 from app.repositories.product_repo import ProductRepository
+from app.schemas.event import EventEnvelope
 from app.schemas.image_jobs_schema import ProductImageUploadPayload
 from app.schemas.product_schema import ProductCreate, ProductResponse, ProductUpdate
 from app.schemas.response import PaginatedResponse
 from app.services.base_service import BaseService
 from app.services.cache_service import CacheService
+from app.services.event_service import EventService
 from app.services.product_image_service import ProductImageService
 from app.utils.cache_key import build_product_cache_key
 
@@ -56,6 +60,7 @@ class ProductService(BaseService[Product]):
         s3_service: S3Service,
         arq_pool: ArqRedis,
         cache: CacheService,
+        redis: Redis,
     ) -> None:
         super().__init__(db)
         self.arq_pool = arq_pool
@@ -66,6 +71,7 @@ class ProductService(BaseService[Product]):
             product_image_repo=ProductImageRepository(db),
             s3_service=s3_service,
         )
+        self.event_service = EventService(redis)
 
     async def _validate_product_images(
         self,
@@ -272,8 +278,17 @@ class ProductService(BaseService[Product]):
 
             await self.db.commit()
 
-            await self.cache.invalidate_product_list_cache(
-                f"{CacheKeyConstants.PRODUCT_LIST_CACHE_PREFIX}*"
+            await self.cache.invalidate_product_list_cache()
+
+            await self.event_service.publish(
+                EventEnvelope(
+                    event=EventType.PRODUCT_CREATED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product.id),
+                    },
+                ),
             )
 
             await self.arq_pool.enqueue_job(
@@ -416,6 +431,7 @@ class ProductService(BaseService[Product]):
         product_id: UUID,
         payload: ProductUpdate,
         images: list[UploadFile],
+        request_id: str,
         removed_image_ids: list[UUID] | None = None,
         primary_image_id: UUID | None = None,
     ) -> Product:
@@ -606,6 +622,17 @@ class ProductService(BaseService[Product]):
 
             await self.cache.delete_keys(build_product_cache_key(id=product.id))
 
+            await self.event_service.publish(
+                EventEnvelope(
+                    event=EventType.PRODUCT_UPDATED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product.id),
+                    },
+                ),
+            )
+
         except IntegrityError as exc:
             await self.db.rollback()
             await self._cleanup_s3(staging_object_keys)
@@ -659,7 +686,11 @@ class ProductService(BaseService[Product]):
 
         return product
 
-    async def delete_product(self, product_id: UUID) -> None:
+    async def delete_product(
+        self,
+        product_id: UUID,
+        request_id: str,
+    ) -> None:
 
         product = await self.product_repo.get_by_id(
             product_id=product_id,
@@ -674,15 +705,24 @@ class ProductService(BaseService[Product]):
         await self.product_repo.delete(product=product)
         await self.db.commit()
 
-        await self.cache.invalidate_product_list_cache(
-            f"{CacheKeyConstants.PRODUCT_LIST_CACHE_PREFIX}*"
-        )
+        await self.cache.invalidate_product_list_cache()
 
         await self.cache.invalidate_product_cache(
             id=product.id,
         )
 
-        await self.cache.delete(build_product_cache_key(product_id=product.id))
+        await self.cache.delete_keys(build_product_cache_key(id=product.id))
+
+        await self.event_service.publish(
+            EventEnvelope(
+                event=EventType.PRODUCT_DELETED,
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product.id),
+                },
+            ),
+        )
 
         try:
             await self._enqueue_s3_cleanup(object_keys)

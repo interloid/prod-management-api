@@ -6,7 +6,7 @@ from arq import Retry
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.core.constants import CacheKeyConstants, ProductImageConstants
+from app.core.constants import CacheKeyConstants, EventType, ProductImageConstants
 from app.core.logging import get_logger
 from app.core.settings import settings
 from app.models.product_image_model import ProductImage
@@ -391,7 +391,7 @@ async def upload_product_images(
 
         await event_service.publish(
             EventEnvelope(
-                event="image.processed",
+                event=EventType.IMAGE_PROCESSED,
                 request_id=request_id,
                 timestamp=datetime.now(UTC),
                 data={
@@ -449,6 +449,18 @@ async def upload_product_images(
             staging_object_keys=(staging_object_keys),
         )
 
+        await event_service.publish(
+            EventEnvelope(
+                event=EventType.IMAGE_FAILED,
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product_uuid),
+                    "error": str(exc),
+                },
+            ),
+        )
+
         raise
 
     except (
@@ -468,9 +480,21 @@ async def upload_product_images(
             staging_object_keys=(staging_object_keys),
         )
 
+        await event_service.publish(
+            EventEnvelope(
+                event=EventType.IMAGE_FAILED,
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product_uuid),
+                    "error": str(exc),
+                },
+            ),
+        )
+
         raise
 
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Unexpected terminal product-image job failure | product_id=%s",
             product_id,
@@ -479,6 +503,18 @@ async def upload_product_images(
         await _cleanup_staging_objects(
             s3=s3,
             staging_object_keys=(staging_object_keys),
+        )
+
+        await event_service.publish(
+            EventEnvelope(
+                event=EventType.IMAGE_FAILED,
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product_uuid),
+                    "error": str(exc),
+                },
+            ),
         )
 
         raise

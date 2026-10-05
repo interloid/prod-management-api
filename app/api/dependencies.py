@@ -48,12 +48,10 @@ def get_product_service(
     s3_service: S3Service = Depends(get_s3_service),
     arq_pool: ArqRedis = Depends(get_arq_pool),
     cache: CacheService = Depends(get_cache_service),
+    redis: Redis = Depends(get_redis),
 ) -> ProductService:
     return ProductService(
-        db=db,
-        s3_service=s3_service,
-        arq_pool=arq_pool,
-        cache=cache,
+        db=db, s3_service=s3_service, arq_pool=arq_pool, cache=cache, redis=redis
     )
 
 

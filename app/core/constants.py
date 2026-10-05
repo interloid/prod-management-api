@@ -115,3 +115,11 @@ class CacheKeyConstants:
 
 class EventChannelConstants:
     SSE_EVENTS_CHANNEL = "pms:sse:events"
+
+
+class EventType(StrEnum):
+    PRODUCT_CREATED = "product.created"
+    PRODUCT_UPDATED = "product.updated"
+    PRODUCT_DELETED = "product.deleted"
+    IMAGE_PROCESSED = "image.processed"
+    IMAGE_FAILED = "image.failed"

@@ -423,6 +423,7 @@ def parse_removed_image_ids(
     responses=CRUD_ERROR_RESPONSES,
 )
 async def update_product(
+    request: Request,
     id: UUID,
     name: Annotated[str | None, Form()] = None,
     sku: Annotated[str | None, Form()] = None,
@@ -471,12 +472,15 @@ async def update_product(
             exc.errors(),
         ) from exc
 
+    request_id = request.state.request_id
+
     product = await product_service.update_product(
         product_id=id,
         payload=payload,
         images=images or [],
         removed_image_ids=parsed_removed_image_ids,
         primary_image_id=primary_image_id,
+        request_id=request_id,
     )
 
     return ApiResponse(
@@ -498,11 +502,16 @@ async def update_product(
     responses=CRUD_ERROR_RESPONSES,
 )
 async def delete_product(
+    request: Request,
     id: UUID,
     product_service: ProductService = Depends(get_product_service),
 ) -> Response:
+
+    request_id = request.state.request_id
+
     await product_service.delete_product(
         product_id=id,
+        request_id=request_id,
     )
 
     return Response(
