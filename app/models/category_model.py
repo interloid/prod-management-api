@@ -23,11 +23,6 @@ class Category(BaseEntity):
         nullable=True,
     )
 
-    avatar_url: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
     products: Mapped[list["Product"]] = relationship(
         "Product",
         back_populates="category",

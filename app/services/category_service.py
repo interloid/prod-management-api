@@ -1,3 +1,4 @@
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -45,11 +46,21 @@ class CategoryService(BaseService[Category]):
 
         category_stmt = self.category_repo.get_all(search=search)
 
-        categories, total = await self.paginate(
-            category_stmt,
+        count_stmt = select(func.count()).select_from(
+            category_stmt.order_by(None).subquery()
+        )
+
+        count_result = await self.db.execute(count_stmt)
+        total = count_result.scalar_one()
+
+        offset = self.calculate_offset(
             page=page,
             page_size=page_size,
         )
+
+        result = await self.db.execute(category_stmt.offset(offset).limit(page_size))
+
+        categories = result.all()
 
         response = PaginatedResponse(
             message="Categories retrieved successfully",
@@ -57,8 +68,10 @@ class CategoryService(BaseService[Category]):
                 CategoryResponse(
                     id=category.id,
                     name=category.name,
+                    description=category.description,
+                    total_products=total_products,
                 )
-                for category in categories
+                for category, total_products in categories
             ],
             pagination=PaginationMeta(
                 page=page,

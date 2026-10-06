@@ -1,9 +1,10 @@
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category_model import Category
+from app.models.product_model import Product
 
 
 class CategoryRepository:
@@ -20,8 +21,12 @@ class CategoryRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    def get_all(self, search: str | None = None) -> Select[tuple[Category]]:
-        stmt = select(Category)
+    def get_all(self, search: str | None = None) -> Select[tuple[Category, int]]:
+        stmt = (
+            select(Category, func.count(Product.id).label("total_products"))
+            .outerjoin(Product, Product.category_id == Category.id)
+            .group_by(Category.id)
+        )
 
         if search:
             normalized_search = search.strip()
