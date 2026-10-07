@@ -1,7 +1,8 @@
+import asyncio
 import json
 
 from fastapi.sse import ServerSentEvent
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisError
 
 from app.core.constants import EventChannelConstants
 from app.core.logging import get_logger
@@ -35,35 +36,57 @@ class EventService:
         )
 
     async def subscribe(self) -> None:
-        pubsub = self.redis.pubsub()
 
-        channel = await pubsub.subscribe(
-            EventChannelConstants.SSE_EVENTS_CHANNEL,
-        )
+        retry_delay = 1
 
-        logger.info("SSE subscribed | channel=%s", channel)
+        while True:
+            pubsub = self.redis.pubsub()
 
-        try:
-            async for message in pubsub.listen():
-                logger.info("Redis Pub/Sub message received | %s", message)
-
-                if message["type"] != "message":
-                    continue
-
-                envelope = EventEnvelope.model_validate(
-                    json.loads(message["data"]),
+            try:
+                channel = await pubsub.subscribe(
+                    EventChannelConstants.SSE_EVENTS_CHANNEL,
                 )
 
-                sse_event = ServerSentEvent(
-                    event=envelope.event,
-                    data=envelope.data,
-                    id=envelope.request_id,
+                logger.info("SSE subscribed | channel=%s", channel)
+
+                retry_delay = 1
+
+                async for message in pubsub.listen():
+                    logger.info("Redis Pub/Sub message received | %s", message)
+
+                    if message["type"] != "message":
+                        continue
+
+                    envelope = EventEnvelope.model_validate(
+                        json.loads(message["data"]),
+                    )
+
+                    sse_event = ServerSentEvent(
+                        event=envelope.event,
+                        data=envelope.data,
+                        id=envelope.request_id,
+                    )
+
+                    await sse_manager.broadcast(sse_event)
+
+            except asyncio.CancelledError:
+                raise
+
+            except RedisError:
+                logger.exception("Redis Pub/Sub connection lost; reconnecting")
+
+            except Exception:
+                logger.exception("Unexpected Redis subscriber error; reconnecting")
+
+            finally:
+                await pubsub.unsubscribe(
+                    EventChannelConstants.SSE_EVENTS_CHANNEL,
                 )
+                await pubsub.aclose()
 
-                await sse_manager.broadcast(sse_event)
+            await asyncio.sleep(retry_delay)
 
-        finally:
-            await pubsub.unsubscribe(
-                EventChannelConstants.SSE_EVENTS_CHANNEL,
+            retry_delay = min(
+                retry_delay * 2,
+                30,
             )
-            await pubsub.aclose()

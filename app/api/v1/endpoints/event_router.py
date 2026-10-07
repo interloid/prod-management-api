@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterable
 
 from fastapi import APIRouter, Depends
@@ -19,8 +20,15 @@ async def events() -> AsyncIterable[ServerSentEvent]:
 
     try:
         while True:
-            event = await queue.get()
-            yield event
+            try:
+                event = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=15,
+                )
+                yield event
+
+            except TimeoutError:
+                yield ServerSentEvent(comment="ping")
 
     finally:
         sse_manager.unsubscribe(queue)

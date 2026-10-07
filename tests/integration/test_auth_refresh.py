@@ -260,7 +260,7 @@ async def test_successful_refresh_rotates_token(
 
     assert "httponly" in cookie_header
     assert "secure" in cookie_header
-    assert "samesite=none" in cookie_header
+    assert "samesite=lax" in cookie_header
 
     me_response = await client.get(
         "/api/v1/auth/me",

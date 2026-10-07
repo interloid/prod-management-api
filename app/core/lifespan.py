@@ -15,6 +15,8 @@ from app.services.event_service import EventService
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     async with AsyncExitStack() as stack:
+        event_task = None
+
         try:
             redis = create_redis()
             stack.push_async_callback(redis.aclose)
@@ -50,4 +52,5 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             yield
 
         finally:
-            event_task.cancel()
+            if event_task is not None:
+                event_task.cancel()

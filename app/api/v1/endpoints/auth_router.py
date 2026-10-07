@@ -35,7 +35,7 @@ def set_cookie(
         value=raw_refresh_token,
         httponly=True,
         secure=True,
-        samesite="none",
+        samesite="lax",
         path="/",
         max_age=refresh_max_age,
     )
@@ -48,7 +48,7 @@ def delete_cookie(response: Response) -> None:
         path="/",
         secure=True,
         httponly=True,
-        samesite="none",
+        samesite="lax",
     )
 
     response.delete_cookie(
@@ -56,7 +56,7 @@ def delete_cookie(response: Response) -> None:
         path="/",
         secure=True,
         httponly=True,
-        samesite="none",
+        samesite="lax",
     )
 
 
@@ -71,7 +71,7 @@ async def login(
     login_data: LoginRequest,
     response: Response,
     service: AuthService = Depends(get_auth_service),
-) -> tuple[ApiResponse[None], str, str, int]:
+) -> ApiResponse[None]:
 
     (result, access_token, raw_refresh_token, refresh_max_age) = await service.login(
         login_data

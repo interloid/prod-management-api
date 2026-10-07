@@ -40,10 +40,12 @@ async def check_user_rate_limit(
 
     key = f"rate-limit:user:{user_id}:{action}"
 
-    count = await redis.incr(key)
+    added = await redis.set(key, 1, ex=window_seconds, nx=True)
 
-    if count == 1:
-        await redis.expire(key, window_seconds)
+    if added:
+        count = 1
+    else:
+        count = await redis.incr(key)
 
     if count > limit:
         raise TooManyRequestsException(

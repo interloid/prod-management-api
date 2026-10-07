@@ -657,7 +657,8 @@ class ProductService(BaseService[Product]):
             job = await self.arq_pool.enqueue_job(
                 "upload_product_images",
                 str(product.id),
-                job_images,
+                [image.model_dump(mode="json") for image in job_images],
+                request_id=str(request_id),
                 _expires=86_400,
             )
 

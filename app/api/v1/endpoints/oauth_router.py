@@ -37,10 +37,15 @@ async def oauth(
 )
 async def oauth_callback(
     provider: str,
-    code: str,
-    state: str,
+    state: str | None = None,
+    code: str | None = None,
+    error: str | None = None,
     service: AuthService = Depends(get_auth_service),
 ) -> RedirectResponse:
+
+    if error or not code or not state:
+        return RedirectResponse(f"{settings.YOUR_REACT_URL}/login?error=oauth_denied")
+
     (
         _result,
         access_token,

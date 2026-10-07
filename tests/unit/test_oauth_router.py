@@ -64,7 +64,7 @@ async def test_callback_accepts_empty_data_and_sets_token_cookies(
         assert cookie.value == value
         assert cookie["httponly"]
         assert cookie["secure"]
-        assert cookie["samesite"] == "none"
+        assert cookie["samesite"] == "lax"
         assert cookie["path"] == "/"
         assert cookie["max-age"] == str(max_age)
     service.oauth_callback.assert_awaited_once_with(

@@ -135,7 +135,7 @@ async def to_product_response(
         Depends(enforce_write_rate_limit),
     ],
     response_model=ApiResponse[ProductResponse],
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     responses=CRUD_ERROR_RESPONSES,
 )
 async def create_product(
@@ -149,7 +149,7 @@ async def create_product(
     description: Annotated[str | None, Form()] = None,
     images: Annotated[list[UploadFile] | None, File()] = None,
     product_service: ProductService = Depends(get_product_service),
-) -> ApiResponse[ProductResponse]:
+) -> ApiResponse[None]:
 
     try:
         payload = ProductCreate(
@@ -377,7 +377,9 @@ async def get_product(
 
     if if_none_match == etag:
         http_response.status_code = status.HTTP_304_NOT_MODIFIED
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+        return Response(
+            status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": cached_etag}
+        )
 
     return response
 

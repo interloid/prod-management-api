@@ -238,7 +238,7 @@ async def test_successful_password_login(
 
     assert "httponly" in set_cookie_header
     assert "secure" in set_cookie_header
-    assert "samesite=none" in set_cookie_header
+    assert "samesite=lax" in set_cookie_header
 
     result = await db_session.execute(
         select(RefreshToken).where(

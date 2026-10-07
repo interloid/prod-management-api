@@ -89,7 +89,7 @@ async def rate_limit_exception_handler(
                 "code": "TOO_MANY_REQUESTS",
                 "details": None,
             },
-            "request_id": request.state.get("request_id"),
+            "request_id": getattr(request.state, "request_id", None),
         },
     )
 

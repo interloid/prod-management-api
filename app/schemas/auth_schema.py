@@ -1,25 +1,10 @@
-import re
 from typing import Literal
 from uuid import UUID
 
 from pydantic import EmailStr, Field, field_validator
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, validate_password
 from app.schemas.user_schema import UserResponse
-
-
-def validate_password(password: str) -> str:
-
-    if not re.search(r"[A-Z]", password):
-        raise ValueError("Password must contain at least one uppercase letter")
-
-    if not re.search(r"[a-z]", password):
-        raise ValueError("Password must contain at least one lowercase letter")
-
-    if not re.search(r"[0-9]", password):
-        raise ValueError("Password must contain at least one number")
-
-    return password
 
 
 class LoginRequest(BaseSchema):

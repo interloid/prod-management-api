@@ -78,15 +78,18 @@ class CacheService:
             )
 
     async def invalidate_product_list_cache(self) -> None:
-        keys = await self.redis.smembers(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+        try:
+            keys = await self.redis.smembers(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
 
-        if not keys:
-            return
+            if not keys:
+                return
 
-        keys = [key.decode() if isinstance(key, bytes) else key for key in keys]
+            keys = [key.decode() if isinstance(key, bytes) else key for key in keys]
 
-        await self.delete_keys(*keys)
-        await self.delete_keys(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+            await self.delete_keys(*keys)
+            await self.delete_keys(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+        except RedisError:
+            logger.warning("Failed to invalidate product list cache")
 
     async def invalidate_product_cache(self, id: UUID) -> None:
         key = f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}{id}"
@@ -94,4 +97,8 @@ class CacheService:
         await self.delete_keys(key)
 
     async def add_to_set(self, key: str, value: str) -> None:
-        await self.redis.sadd(key, value)
+        try:
+            await self.redis.sadd(key, value)
+
+        except RedisError:
+            logger.warning("Failed to add a value to set key in redis key =%s", key)

@@ -106,6 +106,8 @@ async def upload_product_images(
 
     staging_object_keys: list[str] = []
 
+    product_uuid: UUID | None = None
+
     try:
         product_uuid = UUID(product_id)
 
@@ -443,23 +445,23 @@ async def upload_product_images(
             product_id,
             job_try,
         )
+        if product_uuid is not None:
+            await _cleanup_staging_objects(
+                s3=s3,
+                staging_object_keys=(staging_object_keys),
+            )
 
-        await _cleanup_staging_objects(
-            s3=s3,
-            staging_object_keys=(staging_object_keys),
-        )
-
-        await event_service.publish(
-            EventEnvelope(
-                event=EventType.IMAGE_FAILED,
-                request_id=request_id,
-                timestamp=datetime.now(UTC),
-                data={
-                    "product_id": str(product_uuid),
-                    "error": str(exc),
-                },
-            ),
-        )
+            await event_service.publish(
+                EventEnvelope(
+                    event=EventType.IMAGE_FAILED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product_uuid),
+                        "error": str(exc),
+                    },
+                ),
+            )
 
         raise
 
@@ -474,23 +476,23 @@ async def upload_product_images(
             product_id,
             exc,
         )
+        if product_uuid is not None:
+            await _cleanup_staging_objects(
+                s3=s3,
+                staging_object_keys=(staging_object_keys),
+            )
 
-        await _cleanup_staging_objects(
-            s3=s3,
-            staging_object_keys=(staging_object_keys),
-        )
-
-        await event_service.publish(
-            EventEnvelope(
-                event=EventType.IMAGE_FAILED,
-                request_id=request_id,
-                timestamp=datetime.now(UTC),
-                data={
-                    "product_id": str(product_uuid),
-                    "error": str(exc),
-                },
-            ),
-        )
+            await event_service.publish(
+                EventEnvelope(
+                    event=EventType.IMAGE_FAILED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product_uuid),
+                        "error": str(exc),
+                    },
+                ),
+            )
 
         raise
 
@@ -500,21 +502,22 @@ async def upload_product_images(
             product_id,
         )
 
-        await _cleanup_staging_objects(
-            s3=s3,
-            staging_object_keys=(staging_object_keys),
-        )
+        if product_uuid is not None:
+            await _cleanup_staging_objects(
+                s3=s3,
+                staging_object_keys=(staging_object_keys),
+            )
 
-        await event_service.publish(
-            EventEnvelope(
-                event=EventType.IMAGE_FAILED,
-                request_id=request_id,
-                timestamp=datetime.now(UTC),
-                data={
-                    "product_id": str(product_uuid),
-                    "error": str(exc),
-                },
-            ),
-        )
+            await event_service.publish(
+                EventEnvelope(
+                    event=EventType.IMAGE_FAILED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product_uuid),
+                        "error": str(exc),
+                    },
+                ),
+            )
 
-        raise
+            raise

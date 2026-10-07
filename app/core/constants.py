@@ -62,7 +62,7 @@ SCOPES: dict[str, str] = {
 }
 
 ROLE_SCOPES: dict[RoleEnum, frozenset[str]] = {
-    RoleEnum.VIEWER: frozenset({"product:read"}),
+    RoleEnum.VIEWER: frozenset({"products:read"}),
     RoleEnum.EDITOR: frozenset(
         {
             "products:read",
