@@ -105,12 +105,9 @@ ROLE_PERMISSIONS: dict[RoleEnum, frozenset[PermissionEnum]] = {
 
 class CacheKeyConstants:
     CATEGORY_LIST_PREFIX = "categories:list"
-
-    PRODUCT_LIST_CACHE_PREFIX = "product:list:"
-
-    PRODUCT_LIST_CACHE_KEYS = "product:list:keys"
-
-    PRODUCT_CACHE_PREFIX = "product:"
+    PRODUCT_LIST_CACHE_PREFIX = "pms:product:list"
+    PRODUCT_LIST_CACHE_KEYS = "pms:product:list:keys"
+    PRODUCT_CACHE_PREFIX = "pms:product:detail"
 
 
 class EventChannelConstants:

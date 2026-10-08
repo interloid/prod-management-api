@@ -68,4 +68,4 @@ def build_product_list_cache_key(
 
 
 def build_product_cache_key(id: UUID) -> str:
-    return f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}{id}"
+    return f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}:{id}"

@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -53,6 +53,19 @@ router = APIRouter(
     prefix="/products",
     tags=["Products"],
 )
+
+
+ProductSort = Literal[
+    "name",
+    "price",
+    "created",
+    "updated",
+]
+
+SortOrder = Literal[
+    "asc",
+    "desc",
+]
 
 
 def build_product_response(
@@ -134,7 +147,7 @@ async def to_product_response(
         Depends(require_permission(PermissionEnum.CREATE_PRODUCTS)),
         Depends(enforce_write_rate_limit),
     ],
-    response_model=ApiResponse[ProductResponse],
+    response_model=ApiResponse[None],
     status_code=status.HTTP_202_ACCEPTED,
     responses=CRUD_ERROR_RESPONSES,
 )
@@ -175,7 +188,10 @@ async def create_product(
         request_id=request_id,
     )
 
-    return ApiResponse(message="Product created successfully")
+    return ApiResponse[None](
+        message="Product created successfully",
+        data=None,
+    )
 
 
 @router.get(
@@ -214,16 +230,8 @@ async def list_products(
     in_stock: bool | None = Query(
         default=None,
     ),
-    sort: str = Query(
-        default="updated",
-        min_length=1,
-        max_length=50,
-    ),
-    order: str = Query(
-        default="desc",
-        min_length=1,
-        max_length=4,
-    ),
+    sort: ProductSort = Query(default="updated"),
+    order: SortOrder = Query(default="desc"),
     page: int = Query(
         default=PaginationEnum.DEFAULT_PAGE,
         ge=1,
@@ -346,8 +354,10 @@ async def get_product(
         http_response.headers["ETag"] = cached_etag
 
         if if_none_match == cached_etag:
-            http_response.status_code = status.HTTP_304_NOT_MODIFIED
-            return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+            return Response(
+                status_code=status.HTTP_304_NOT_MODIFIED,
+                headers={"ETag": cached_etag},
+            )
 
         return ApiResponse[ProductResponse](**cached_data)
 
@@ -376,9 +386,8 @@ async def get_product(
     http_response.headers["ETag"] = etag
 
     if if_none_match == etag:
-        http_response.status_code = status.HTTP_304_NOT_MODIFIED
         return Response(
-            status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": cached_etag}
+            status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag}
         )
 
     return response

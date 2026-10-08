@@ -1,9 +1,12 @@
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import RedirectResponse
 
 from app.api.dependencies import get_auth_service
-from app.api.v1.endpoints.auth_router import set_cookie
+from app.core.cookies import set_cookie
 from app.core.settings import settings
+from app.exceptions.base import AppException
 from app.exceptions.global_exception import AUTH_ERROR_RESPONSES
 from app.services.auth_service import AuthService
 
@@ -43,30 +46,36 @@ async def oauth_callback(
     service: AuthService = Depends(get_auth_service),
 ) -> RedirectResponse:
 
-    if error or not code or not state:
-        return RedirectResponse(f"{settings.YOUR_REACT_URL}/login?error=oauth_denied")
+    try:
+        (
+            _result,
+            access_token,
+            raw_refresh_token,
+            refresh_max_age,
+        ) = await service.oauth_callback(
+            provider=provider,
+            code=code,
+            state=state,
+        )
 
-    (
-        _result,
-        access_token,
-        raw_refresh_token,
-        refresh_max_age,
-    ) = await service.oauth_callback(
-        provider=provider,
-        code=code,
-        state=state,
-    )
+        response = RedirectResponse(
+            url=settings.YOUR_REACT_URL,
+            status_code=302,
+        )
 
-    response = RedirectResponse(
-        url=settings.YOUR_REACT_URL,
-        status_code=302,
-    )
+        set_cookie(
+            response=response,
+            access_token=access_token,
+            raw_refresh_token=raw_refresh_token,
+            refresh_max_age=refresh_max_age,
+        )
 
-    set_cookie(
-        response=response,
-        access_token=access_token,
-        raw_refresh_token=raw_refresh_token,
-        refresh_max_age=refresh_max_age,
-    )
+        return response
 
-    return response
+    except AppException as exc:
+        error_code = quote(exc.code)
+
+        return RedirectResponse(
+            url=f"{settings.YOUR_REACT_URL}/login?error={error_code}",
+            status_code=302,
+        )

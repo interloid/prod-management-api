@@ -92,9 +92,14 @@ class CacheService:
             logger.warning("Failed to invalidate product list cache")
 
     async def invalidate_product_cache(self, id: UUID) -> None:
-        key = f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}{id}"
+        key = f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}:{id}"
 
         await self.delete_keys(key)
+
+    async def invalidate_category_list_cache(self) -> None:
+
+        key = f"{CacheKeyConstants.CATEGORY_LIST_PREFIX}:*"
+        await self.delete_by_pattern(key)
 
     async def add_to_set(self, key: str, value: str) -> None:
         try:

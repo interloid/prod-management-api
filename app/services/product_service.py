@@ -30,8 +30,7 @@ from app.repositories.product_image_repo import ProductImageRepository
 from app.repositories.product_repo import ProductRepository
 from app.schemas.event import EventEnvelope
 from app.schemas.image_jobs_schema import ProductImageUploadPayload
-from app.schemas.product_schema import ProductCreate, ProductResponse, ProductUpdate
-from app.schemas.response import PaginatedResponse
+from app.schemas.product_schema import ProductCreate, ProductUpdate
 from app.services.base_service import BaseService
 from app.services.cache_service import CacheService
 from app.services.event_service import EventService
@@ -278,8 +277,37 @@ class ProductService(BaseService[Product]):
 
             await self.db.commit()
 
+        except IntegrityError as exc:
+            await self.db.rollback()
+            await self._cleanup_s3(staging_object_keys)
+
+            raise ConflictException(
+                message="Product already exists",
+            ) from exc
+
+        except Exception:
+            await self.db.rollback()
+            await self._cleanup_s3(staging_object_keys)
+            raise
+
+        try:
             await self.cache.invalidate_product_list_cache()
 
+        except Exception:
+            logger.exception(
+                "Failed to invalidate product list cache | product_id=%s",
+                product.id,
+            )
+
+        try:
+            await self.cache.invalidate_category_list_cache()
+        except Exception:
+            logger.exception(
+                "Failed to invalidate category list cache | category_id=%s",
+                product.category_id,
+            )
+
+        try:
             await self.event_service.publish(
                 EventEnvelope(
                     event=EventType.PRODUCT_CREATED,
@@ -290,7 +318,15 @@ class ProductService(BaseService[Product]):
                     },
                 ),
             )
+        except Exception:
+            logger.exception(
+                "Failed to publish product-created event "
+                "| product_id=%s | request_id=%s",
+                product.id,
+                request_id,
+            )
 
+        try:
             await self.arq_pool.enqueue_job(
                 "upload_product_images",
                 str(product.id),
@@ -298,28 +334,14 @@ class ProductService(BaseService[Product]):
                 request_id=str(request_id),
                 _expires=86_400,
             )
-
-            product = await self.product_repo.get_by_id(
-                product_id=product.id,
+        except Exception:
+            logger.exception(
+                "Failed to enqueue product-image job | product_id=%s | request_id=%s",
+                product.id,
+                request_id,
             )
 
-            if product is None:
-                logger.warning("Product not found after creation")
-                raise RuntimeError("Product not found after creation")
-
-            return product
-
-        except IntegrityError as exc:
-            await self.db.rollback()
-            await self._cleanup_s3(staging_object_keys)
-            raise ConflictException(
-                message=("Product already exists"),
-            ) from exc
-
-        except Exception:
-            await self.db.rollback()
-            await self._cleanup_s3(staging_object_keys)
-            raise
+        return product
 
     async def get_product(self, product_id: UUID) -> Product:
 
@@ -344,7 +366,7 @@ class ProductService(BaseService[Product]):
         sort_order: str = "desc",
         page: int = 1,
         page_size: int = 10,
-    ) -> PaginatedResponse[ProductResponse]:
+    ) -> tuple[list[Product], int]:
 
         normalized_sort_order = self.validate_sort_order(
             sort_order,
@@ -353,7 +375,6 @@ class ProductService(BaseService[Product]):
         sort_column = self.resolve_sort_column(
             sort_by=sort_by,
             sort_fields=self.SORT_FIELDS,
-            default_sort=self.DEFAULT_SORT,
         )
 
         stmt = select(Product).options(
@@ -707,6 +728,7 @@ class ProductService(BaseService[Product]):
         await self.db.commit()
 
         await self.cache.invalidate_product_list_cache()
+        await self.cache.invalidate_category_list_cache()
 
         await self.cache.invalidate_product_cache(
             id=product.id,

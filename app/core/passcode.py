@@ -85,12 +85,19 @@ async def get_passcode_attempt_ttl(redis: Redis, email: str) -> int:
 
 
 async def increment_passcode_attempts(redis: Redis, email: str) -> int:
-
     key = get_passcode_attempt_key(email)
-    attempts = await redis.incr(key)
 
-    await redis.expire(key, settings.PASSCODE_EXPIRE_SECONDS)
-    return attempts
+    added = await redis.set(
+        key,
+        1,
+        ex=settings.PASSCODE_EXPIRE_SECONDS,
+        nx=True,
+    )
+
+    if added:
+        return 1
+
+    return await redis.incr(key)
 
 
 async def reset_passcode_attempts(redis: Redis, email: str) -> None:

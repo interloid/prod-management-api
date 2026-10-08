@@ -121,8 +121,6 @@ async def upload_product_images(
                 "Maximum product image limit exceeded",
             )
 
-        payload_images: list[ProductImageUploadPayload] = []
-
         payload_images = [
             ProductImageUploadPayload.model_validate(
                 image,
@@ -520,4 +518,4 @@ async def upload_product_images(
                 ),
             )
 
-            raise
+        raise

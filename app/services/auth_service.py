@@ -360,12 +360,6 @@ class AuthService:
 
         user = await self.user_repo.get_by_email(email)
 
-        if user is not None and not user.is_active:
-            logger.warning("Invalid email passcode verification attempt")
-            raise UnauthorizedException(
-                message="Invalid email passcode verification attempt.",
-            )
-
         await check_passcode_request_limit(
             redis=redis,
             email=email,

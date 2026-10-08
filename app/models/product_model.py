@@ -18,7 +18,7 @@ class Product(BaseEntity):
 
     __table_args__ = (
         CheckConstraint(
-            "price >= 0",
+            "price >= 1",
             name="ck_products_price_non_negative",
         ),
         CheckConstraint(

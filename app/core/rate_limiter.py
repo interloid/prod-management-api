@@ -6,26 +6,13 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.api.dependencies import get_current_user
-from app.core.settings import settings
-from app.db.redis import get_redis
+from app.db.redis import get_redis, get_redis_uri
 from app.exceptions.custom import TooManyRequestsException
 from app.models.user_model import User
 
-# def get_user_rate_limit_key(request: Request) -> str:
-#     user_id = getattr(
-#         request.state,
-#         "rate_limit_user_id",
-#         None,
-#     )
-
-#     if user_id is None:
-#         return get_remote_address(request)
-
-#     return f"user:{user_id}"
-
 limiter = Limiter(
     key_func=get_remote_address,
-    storage_uri=settings.REDIS_URL,
+    storage_uri=get_redis_uri(),
 )
 
 
