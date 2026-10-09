@@ -43,7 +43,6 @@ class ProductImageService:
             else f"products/{product_id}/images/{uuid4()}"
         )
 
-        # url =
         await self.s3_service.upload_file(
             data=data,
             object_key=object_key,
@@ -53,7 +52,6 @@ class ProductImageService:
         try:
             image = ProductImage(
                 product_id=product_id,
-                # url=url,
                 object_key=object_key,
                 content_hash=content_hash,
                 is_primary=False,

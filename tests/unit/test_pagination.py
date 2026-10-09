@@ -135,9 +135,9 @@ def test_validate_sort_order_rejects_invalid_values(
 @pytest.mark.parametrize(
     ("sort_by", "expected"),
     [
-        ("NAME", "NAME_COLUMN"),
-        (" Price ", "PRICE_COLUMN"),
-        ("pRiCe", "PRICE_COLUMN"),
+        ("name", "NAME_COLUMN"),
+        (" price ", "PRICE_COLUMN"),
+        ("PRICE", "PRICE_COLUMN"),
     ],
 )
 def test_resolve_sort_column_normalizes_sort_by(
@@ -152,25 +152,9 @@ def test_resolve_sort_column_normalizes_sort_by(
     result = BaseService.resolve_sort_column(
         sort_by=sort_by,
         sort_fields=sort_fields,
-        default_sort="name",
     )
 
     assert result == expected
-
-
-def test_resolve_sort_column_uses_default_when_sort_field_is_unknown():
-    sort_fields = {
-        "name": "NAME_COLUMN",
-        "price": "PRICE_COLUMN",
-    }
-
-    result = BaseService.resolve_sort_column(
-        sort_by="unknown",
-        sort_fields=sort_fields,
-        default_sort="name",
-    )
-
-    assert result == "NAME_COLUMN"
 
 
 def test_resolve_sort_column_rejects_invalid_sort_field():
@@ -183,7 +167,6 @@ def test_resolve_sort_column_rejects_invalid_sort_field():
         BaseService.resolve_sort_column(
             sort_by="unknown",
             sort_fields=sort_fields,
-            default_sort="unknown_default",
         )
 
     assert str(exc_info.value) == "Invalid sort field"

@@ -6,3 +6,5 @@ from app.schemas.common import BaseSchema
 class CategoryResponse(BaseSchema):
     id: UUID
     name: str
+    description: str | None
+    total_products: int

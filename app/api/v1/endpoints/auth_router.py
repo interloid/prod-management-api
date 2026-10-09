@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Cookie, Depends, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 
 from app.api.dependencies import get_auth_service, get_current_user
 from app.core.constants import ROLE_PERMISSIONS, RoleEnum
-from app.core.cookies import set_access_cookie
+from app.core.cookies import delete_cookie, set_cookie
+from app.core.rate_limiter import enforce_read_rate_limit, limiter
 from app.core.settings import settings
 from app.exceptions.global_exception import AUTH_ERROR_RESPONSES
 from app.models.user_model import User
@@ -19,56 +20,18 @@ router = APIRouter(
 )
 
 
-def set_cookie(
-    *,
-    response: Response,
-    access_token: str,
-    raw_refresh_token: str,
-    refresh_max_age: int,
-) -> None:
-
-    set_access_cookie(response, access_token)
-
-    response.set_cookie(
-        key=settings.REFRESH_TOKEN_COOKIE_NAME,
-        value=raw_refresh_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-        max_age=refresh_max_age,
-    )
-
-
-def delete_cookie(response: Response) -> None:
-
-    response.delete_cookie(
-        key=settings.ACCESS_TOKEN_COOKIE_NAME,
-        path="/",
-        secure=True,
-        httponly=True,
-        samesite="none",
-    )
-
-    response.delete_cookie(
-        key=settings.REFRESH_TOKEN_COOKIE_NAME,
-        path="/",
-        secure=True,
-        httponly=True,
-        samesite="none",
-    )
-
-
 @router.post(
     "/login",
     response_model=ApiResponse[None],
     responses=AUTH_ERROR_RESPONSES,
 )
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     login_data: LoginRequest,
     response: Response,
     service: AuthService = Depends(get_auth_service),
-) -> tuple[ApiResponse[None], str, str, int]:
+) -> ApiResponse[None]:
 
     (result, access_token, raw_refresh_token, refresh_max_age) = await service.login(
         login_data
@@ -151,6 +114,7 @@ async def logout_all_devices(
 
 @router.get(
     "/me",
+    dependencies=[Depends(enforce_read_rate_limit)],
     response_model=ApiResponse[UserResponse],
     responses=AUTH_ERROR_RESPONSES,
 )

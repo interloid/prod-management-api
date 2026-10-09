@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.authorization import require_permission
+from app.api.dependencies import get_cache_service
 from app.core.constants import PaginationEnum, PermissionEnum
+from app.core.rate_limiter import enforce_read_rate_limit
 from app.db.session import get_db
 from app.exceptions.global_exception import CRUD_ERROR_RESPONSES
-from app.models.category_model import Category
 from app.schemas.category_schema import CategoryResponse
-from app.schemas.response import PaginatedResponse, PaginationMeta
+from app.schemas.response import PaginatedResponse
+from app.services.cache_service import CacheService
 from app.services.category_service import CategoryService
 
 router = APIRouter(
@@ -16,16 +18,12 @@ router = APIRouter(
 )
 
 
-def to_category_response(category: Category) -> CategoryResponse:
-    return CategoryResponse(
-        id=category.id,
-        name=category.name,
-    )
-
-
 @router.get(
     "",
-    dependencies=[Depends(require_permission(PermissionEnum.VIEW_PRODUCTS))],
+    dependencies=[
+        Depends(require_permission(PermissionEnum.VIEW_PRODUCTS)),
+        Depends(enforce_read_rate_limit),
+    ],
     response_model=PaginatedResponse[CategoryResponse],
     status_code=status.HTTP_200_OK,
     responses=CRUD_ERROR_RESPONSES,
@@ -46,27 +44,11 @@ async def get_categories(
         le=PaginationEnum.MAX_PAGE_SIZE,
     ),
     db: AsyncSession = Depends(get_db),
+    cache: CacheService = Depends(get_cache_service),
 ) -> PaginatedResponse[CategoryResponse]:
 
-    category_service = CategoryService(db=db)
+    category_service = CategoryService(db=db, cache=cache)
 
-    categories, total = await category_service.get_categories(
+    return await category_service.get_categories(
         search=search, page=page, page_size=page_size
-    )
-
-    items = [to_category_response(category) for category in categories]
-
-    total_pages = category_service.calculate_total_pages(
-        total=total, page_size=page_size
-    )
-
-    return PaginatedResponse(
-        message="Categories retrieved successfully",
-        data=items,
-        pagination=PaginationMeta(
-            page=page,
-            page_size=page_size,
-            total=total,
-            total_pages=total_pages,
-        ),
     )

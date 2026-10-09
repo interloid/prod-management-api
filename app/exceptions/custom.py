@@ -1,4 +1,6 @@
-from fastapi import status
+from fastapi import Request, status
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.exceptions.base import AppException
 
@@ -71,6 +73,25 @@ class ConflictException(AppException):
             error_code="CONFLICT",
             details=details,
         )
+
+
+async def rate_limit_exception_handler(
+    request: Request,
+    exc: RateLimitExceeded,
+) -> JSONResponse:
+
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "success": False,
+            "message": "Rate limit exceeded. Please try again later.",
+            "error": {
+                "code": "TOO_MANY_REQUESTS",
+                "details": None,
+            },
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
 
 
 class TooManyRequestsException(AppException):

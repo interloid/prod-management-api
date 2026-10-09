@@ -18,6 +18,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
 
         request_id = generate_request_id()
+        request.state.request_id = request_id
 
         request_id_token = request_id_ctx.set(request_id)
         method_token = method_ctx.set(request.method)

@@ -1,9 +1,14 @@
 from typing import Any
 from urllib.parse import quote
 
+from botocore.exceptions import ClientError, EndpointConnectionError
 from fastapi import Request
 
+from app.core.logging import get_logger
 from app.core.settings import settings
+from app.exceptions.custom import InternalServerException, ServiceUnavailableException
+
+logger = get_logger(__name__)
 
 
 class S3Service:
@@ -15,19 +20,56 @@ class S3Service:
         self, data: bytes, object_key: str, content_type: str
     ) -> None:
 
-        await self.client.put_object(
-            Bucket=self.bucket_name,
-            Key=object_key,
-            Body=data,
-            ContentType=content_type,
-        )
+        try:
+            await self.client.put_object(
+                Bucket=self.bucket_name,
+                Key=object_key,
+                Body=data,
+                ContentType=content_type,
+            )
+        except ClientError:
+            logger.warning(
+                "S3 put_object failed | object_key=%s",
+                object_key,
+            )
+            raise InternalServerException(
+                message="Failed to upload file",
+            )
+
+        except EndpointConnectionError:
+            logger.warning(
+                "Unable to connect to S3 | object_key=%s",
+                object_key,
+            )
+            raise ServiceUnavailableException(
+                message="File storage service is unavailable",
+            )
 
     async def delete_file(self, object_key: str) -> None:
 
-        await self.client.delete_object(
-            Bucket=self.bucket_name,
-            Key=object_key,
-        )
+        try:
+            await self.client.delete_object(
+                Bucket=self.bucket_name,
+                Key=object_key,
+            )
+
+        except ClientError:
+            logger.warning(
+                "S3 delete_object failed | object_key=%s",
+                object_key,
+            )
+            raise InternalServerException(
+                message="Failed to delete file",
+            )
+
+        except EndpointConnectionError:
+            logger.warning(
+                "Unable to connect to S3 | object_key=%s",
+                object_key,
+            )
+            raise ServiceUnavailableException(
+                message="File storage service is unavailable",
+            )
 
     async def generate_cloudfront_urls(
         self,

@@ -1,17 +1,21 @@
 import asyncio
 import hashlib
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from arq.connections import ArqRedis
 from fastapi import UploadFile
+from redis.asyncio import Redis
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.constants import (
+    EventType,
     ProductImageConstants,
+    ProductSortField,
     ProductStatusEnum,
 )
 from app.core.logging import get_logger
@@ -25,9 +29,12 @@ from app.models.product_model import Product
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.product_image_repo import ProductImageRepository
 from app.repositories.product_repo import ProductRepository
+from app.schemas.event import EventEnvelope
 from app.schemas.image_jobs_schema import ProductImageUploadPayload
 from app.schemas.product_schema import ProductCreate, ProductUpdate
 from app.services.base_service import BaseService
+from app.services.cache_service import CacheService
+from app.services.event_service import EventService
 from app.services.product_image_service import ProductImageService
 
 logger = get_logger(__name__)
@@ -35,29 +42,34 @@ logger = get_logger(__name__)
 
 class ProductService(BaseService[Product]):
     SORT_FIELDS = {
-        "name": Product.name,
-        "sku": Product.sku,
-        "category": Product.category_id,
-        "price": Product.price,
-        "stock": Product.stock,
-        "status": Product.status,
-        "updated": Product.updated_at,
+        ProductSortField.NAME: Product.name,
+        ProductSortField.SKU: Product.sku,
+        ProductSortField.CATEGORY: Product.category_id,
+        ProductSortField.PRICE: Product.price,
+        ProductSortField.STOCK: Product.stock,
+        ProductSortField.STATUS: Product.status,
+        ProductSortField.CREATED: Product.created_at,
+        ProductSortField.UPDATED: Product.updated_at,
     }
 
-    DEFAULT_SORT = "updated"
-
     def __init__(
-        self, db: AsyncSession, s3_service: S3Service, arq_pool: ArqRedis
+        self,
+        db: AsyncSession,
+        s3_service: S3Service,
+        arq_pool: ArqRedis,
+        cache: CacheService,
+        redis: Redis,
     ) -> None:
         super().__init__(db)
         self.arq_pool = arq_pool
-
+        self.cache = cache
         self.product_repo = ProductRepository(db)
         self.category_repo = CategoryRepository(db)
         self.product_image_service = ProductImageService(
             product_image_repo=ProductImageRepository(db),
             s3_service=s3_service,
         )
+        self.event_service = EventService(redis)
 
     async def _validate_product_images(
         self,
@@ -177,7 +189,7 @@ class ProductService(BaseService[Product]):
         return content_hashes
 
     async def create_product(
-        self, payload: ProductCreate, images: list[UploadFile]
+        self, payload: ProductCreate, images: list[UploadFile], request_id: str
     ) -> Product:
 
         await self._validate_product_images(images)
@@ -264,34 +276,71 @@ class ProductService(BaseService[Product]):
 
             await self.db.commit()
 
-            await self.arq_pool.enqueue_job(
-                "upload_product_images",
-                str(product.id),
-                [image.model_dump(mode="json") for image in job_images],
-                _expires=86_400,
-            )
-
-            product = await self.product_repo.get_by_id(
-                product_id=product.id,
-            )
-
-            if product is None:
-                logger.warning("Product not found after creation")
-                raise RuntimeError("Product not found after creation")
-
-            return product
-
         except IntegrityError as exc:
             await self.db.rollback()
             await self._cleanup_s3(staging_object_keys)
+
             raise ConflictException(
-                message=("Product already exists"),
+                message="Product already exists",
             ) from exc
 
         except Exception:
             await self.db.rollback()
             await self._cleanup_s3(staging_object_keys)
             raise
+
+        try:
+            await self.cache.invalidate_product_list_cache()
+
+        except Exception:
+            logger.exception(
+                "Failed to invalidate product list cache | product_id=%s",
+                product.id,
+            )
+
+        try:
+            await self.cache.invalidate_category_list_cache()
+        except Exception:
+            logger.exception(
+                "Failed to invalidate category list cache | category_id=%s",
+                product.category_id,
+            )
+
+        try:
+            await self.event_service.publish(
+                EventEnvelope(
+                    event=EventType.PRODUCT_CREATED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product.id),
+                    },
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to publish product-created event "
+                "| product_id=%s | request_id=%s",
+                product.id,
+                request_id,
+            )
+
+        try:
+            await self.arq_pool.enqueue_job(
+                "upload_product_images",
+                str(product.id),
+                [image.model_dump(mode="json") for image in job_images],
+                request_id=str(request_id),
+                _expires=86_400,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to enqueue product-image job | product_id=%s | request_id=%s",
+                product.id,
+                request_id,
+            )
+
+        return product
 
     async def get_product(self, product_id: UUID) -> Product:
 
@@ -312,22 +361,11 @@ class ProductService(BaseService[Product]):
         min_price: Decimal | None = None,
         max_price: Decimal | None = None,
         in_stock: bool | None = None,
-        sort_by: str = DEFAULT_SORT,
+        sort_by: str = ProductSortField.UPDATED,
         sort_order: str = "desc",
         page: int = 1,
         page_size: int = 10,
     ) -> tuple[list[Product], int]:
-
-        if min_price is not None and max_price is not None and min_price > max_price:
-            logger.warning(
-                "Minimum price cannot be greater than maximum price | "
-                "min_price=%s | max_price=%s",
-                min_price,
-                max_price,
-            )
-            raise BadRequestException(
-                message="Minimum price cannot be greater than maximum price",
-            )
 
         normalized_sort_order = self.validate_sort_order(
             sort_order,
@@ -336,7 +374,6 @@ class ProductService(BaseService[Product]):
         sort_column = self.resolve_sort_column(
             sort_by=sort_by,
             sort_fields=self.SORT_FIELDS,
-            default_sort=self.DEFAULT_SORT,
         )
 
         stmt = select(Product).options(
@@ -401,17 +438,20 @@ class ProductService(BaseService[Product]):
             sort_order=normalized_sort_order,
         )
 
-        return await self.paginate(
+        products, total = await self.paginate(
             stmt,
             page=page,
             page_size=page_size,
         )
+
+        return products, total
 
     async def update_product(
         self,
         product_id: UUID,
         payload: ProductUpdate,
         images: list[UploadFile],
+        request_id: str,
         removed_image_ids: list[UUID] | None = None,
         primary_image_id: UUID | None = None,
     ) -> Product:
@@ -491,6 +531,8 @@ class ProductService(BaseService[Product]):
                     message="Product with this SKU already exists",
                 )
 
+        category_changed = False
+
         if "category_name" in updates:
             category_name = updates["category_name"].strip()
 
@@ -502,6 +544,9 @@ class ProductService(BaseService[Product]):
                 raise NotFoundException(
                     message="Category not found",
                 )
+
+            if product.category_id != category.id:
+                category_changed = True
 
             product.category_id = category.id
             del updates["category_name"]
@@ -609,26 +654,59 @@ class ProductService(BaseService[Product]):
             await self._cleanup_s3(staging_object_keys)
             raise
 
+        await self.cache.invalidate_product_list_cache()
+        await self.cache.invalidate_product_cache(id=product.id)
+
+        if category_changed:
+            try:
+                await self.cache.invalidate_category_list_cache()
+            except Exception:
+                logger.exception(
+                    "Failed to invalidate category list cache | product_id=%s",
+                    product.id,
+                )
+
+        try:
+            await self.event_service.publish(
+                EventEnvelope(
+                    event=EventType.PRODUCT_UPDATED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product.id),
+                    },
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to publish product-updated event | product_id=%s",
+                product.id,
+            )
+
         try:
             await self._enqueue_s3_cleanup(images_to_delete)
         except Exception:
             logger.exception("Failed to enqueue S3 cleanup after product update")
 
         if job_images:
-            job = await self.arq_pool.enqueue_job(
-                "upload_product_images",
-                str(product.id),
-                job_images,
-                _expires=86_400,
-            )
-
-            if job is None:
-                logger.error(
-                    "Product image job was not queued | product_id=%s",
-                    product.id,
+            try:
+                job = await self.arq_pool.enqueue_job(
+                    "upload_product_images",
+                    str(product.id),
+                    [image.model_dump(mode="json") for image in job_images],
+                    request_id=str(request_id),
+                    _expires=86_400,
                 )
-                raise RuntimeError(
-                    "Product image processing could not be queued",
+
+                if job is None:
+                    logger.error(
+                        "Product image job was not queued | product_id=%s",
+                        product.id,
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue product-image job | product_id=%s",
+                    product.id,
                 )
 
         product = await self.product_repo.get_by_id(
@@ -647,7 +725,11 @@ class ProductService(BaseService[Product]):
 
         return product
 
-    async def delete_product(self, product_id: UUID) -> None:
+    async def delete_product(
+        self,
+        product_id: UUID,
+        request_id: str,
+    ) -> None:
 
         product = await self.product_repo.get_by_id(
             product_id=product_id,
@@ -661,6 +743,24 @@ class ProductService(BaseService[Product]):
 
         await self.product_repo.delete(product=product)
         await self.db.commit()
+
+        await self.cache.invalidate_product_list_cache()
+        await self.cache.invalidate_category_list_cache()
+
+        await self.cache.invalidate_product_cache(
+            id=product.id,
+        )
+
+        await self.event_service.publish(
+            EventEnvelope(
+                event=EventType.PRODUCT_DELETED,
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product.id),
+                },
+            ),
+        )
 
         try:
             await self._enqueue_s3_cleanup(object_keys)

@@ -83,15 +83,11 @@ class BaseService[T]:
         *,
         sort_by: str,
         sort_fields: Mapping[str, Any],
-        default_sort: str,
     ) -> Any:
 
         normalized_sort = sort_by.strip().lower()
 
         sort_column = sort_fields.get(normalized_sort)
-
-        if sort_column is None:
-            sort_column = sort_fields.get(default_sort)
 
         if sort_column is None:
             logger.warning("Invalid sort field | sort_fields=%s", sort_fields)

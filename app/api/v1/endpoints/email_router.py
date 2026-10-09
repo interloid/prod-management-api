@@ -2,11 +2,10 @@ from fastapi import APIRouter, Depends, Request, Response
 from redis.asyncio import Redis
 
 from app.api.dependencies import get_auth_service
-from app.api.v1.endpoints.auth_router import set_cookie
+from app.core.cookies import set_cookie
 from app.db.redis import get_redis
 from app.exceptions.global_exception import AUTH_ERROR_RESPONSES
 from app.schemas.auth_schema import (
-    LoginResponse,
     PasscodeRequest,
     PasscodeVerifyRequest,
 )
@@ -43,7 +42,7 @@ async def request_passcode(
 
 @router.post(
     "/passcode/verifications",
-    response_model=ApiResponse[LoginResponse],
+    response_model=ApiResponse[None],
     responses=AUTH_ERROR_RESPONSES,
 )
 async def verify_passcode(
@@ -51,7 +50,7 @@ async def verify_passcode(
     response: Response,
     redis: Redis = Depends(get_redis),
     service: AuthService = Depends(get_auth_service),
-) -> tuple[ApiResponse[None], str, str, int]:
+) -> ApiResponse[None]:
 
     (
         result,

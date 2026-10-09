@@ -15,6 +15,7 @@ from app.exceptions.custom import UnauthorizedException
 from app.models.user_model import User
 from app.repositories.user_repo import UserRepository
 from app.services.auth_service import AuthService
+from app.services.cache_service import CacheService
 from app.services.product_service import ProductService
 
 bearer_schema = HTTPBearer(
@@ -22,6 +23,12 @@ bearer_schema = HTTPBearer(
     description="Enter the JWT access token",
     auto_error=False,
 )
+
+
+async def get_cache_service(
+    redis: Redis = Depends(get_redis),
+) -> CacheService:
+    return CacheService(redis)
 
 
 def get_arq_pool(request: Request) -> ArqRedis:
@@ -40,11 +47,11 @@ def get_product_service(
     db: AsyncSession = Depends(get_db),
     s3_service: S3Service = Depends(get_s3_service),
     arq_pool: ArqRedis = Depends(get_arq_pool),
+    cache: CacheService = Depends(get_cache_service),
+    redis: Redis = Depends(get_redis),
 ) -> ProductService:
     return ProductService(
-        db=db,
-        s3_service=s3_service,
-        arq_pool=arq_pool,
+        db=db, s3_service=s3_service, arq_pool=arq_pool, cache=cache, redis=redis
     )
 
 
@@ -77,6 +84,7 @@ async def get_current_user(
             user = await UserRepository(db).get_by_id(token_payload.sub)
             if user is None or not user.is_active:
                 raise UnauthorizedException(message="Invalid access token")
+            request.state.rate_limit_user_id = str(user.id)
             return user
 
     if refresh_token is None:
@@ -85,4 +93,5 @@ async def get_current_user(
     user, renewed_access_token = await service.renew_access_token(refresh_token)
 
     request.state.renewed_access_token = renewed_access_token
+    request.state.rate_limit_user_id = str(user.id)
     return user

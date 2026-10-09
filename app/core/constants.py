@@ -62,7 +62,7 @@ SCOPES: dict[str, str] = {
 }
 
 ROLE_SCOPES: dict[RoleEnum, frozenset[str]] = {
-    RoleEnum.VIEWER: frozenset({"product:read"}),
+    RoleEnum.VIEWER: frozenset({"products:read"}),
     RoleEnum.EDITOR: frozenset(
         {
             "products:read",
@@ -101,3 +101,33 @@ ROLE_PERMISSIONS: dict[RoleEnum, frozenset[PermissionEnum]] = {
         }
     ),
 }
+
+
+class CacheKeyConstants:
+    CATEGORY_LIST_PREFIX = "categories:list"
+    PRODUCT_LIST_CACHE_PREFIX = "pms:product:list"
+    PRODUCT_LIST_CACHE_KEYS = "pms:product:list:keys"
+    PRODUCT_CACHE_PREFIX = "pms:product:detail"
+
+
+class EventChannelConstants:
+    SSE_EVENTS_CHANNEL = "pms:sse:events"
+
+
+class EventType(StrEnum):
+    PRODUCT_CREATED = "product.created"
+    PRODUCT_UPDATED = "product.updated"
+    PRODUCT_DELETED = "product.deleted"
+    IMAGE_PROCESSED = "image.processed"
+    IMAGE_FAILED = "image.failed"
+
+
+class ProductSortField(StrEnum):
+    NAME = "name"
+    SKU = "sku"
+    CATEGORY = "category"
+    PRICE = "price"
+    STOCK = "stock"
+    STATUS = "status"
+    CREATED = "created"
+    UPDATED = "updated"

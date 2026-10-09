@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, field_validator
 
 from app.core.constants import PermissionEnum, RoleEnum
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, validate_password
 
 
 class UserBase(BaseSchema):
@@ -12,6 +12,11 @@ class UserBase(BaseSchema):
 
 class UserCreate(UserBase):
     password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate(cls, value: str) -> str:
+        return validate_password(value)
 
 
 class UserResponse(UserBase):

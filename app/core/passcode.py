@@ -67,13 +67,11 @@ async def consume_passcode(redis: Redis, email: str, expected_hash: str) -> bool
 
 async def get_passcode_attempts(redis: Redis, email: str) -> int:
 
-    key = get_passcode_attempt_key(email)
-    attempts = await redis.get(key)
-
-    if attempts is None:
-        return 0
-
-    return int(attempts)
+    return await _increment_with_window(
+        redis,
+        get_passcode_attempt_key(email),
+        settings.PASSCODE_EXPIRE_SECONDS,
+    )
 
 
 async def get_passcode_attempt_ttl(redis: Redis, email: str) -> int:
@@ -85,12 +83,37 @@ async def get_passcode_attempt_ttl(redis: Redis, email: str) -> int:
 
 
 async def increment_passcode_attempts(redis: Redis, email: str) -> int:
-
     key = get_passcode_attempt_key(email)
-    attempts = await redis.incr(key)
 
-    await redis.expire(key, settings.PASSCODE_EXPIRE_SECONDS)
-    return attempts
+    added = await redis.set(
+        key,
+        1,
+        ex=settings.PASSCODE_EXPIRE_SECONDS,
+        nx=True,
+    )
+
+    if added:
+        return 1
+
+    return await redis.incr(key)
+
+
+async def _increment_with_window(
+    redis: Redis,
+    key: str,
+    window_seconds: int,
+) -> int:
+    added = await redis.set(
+        key,
+        1,
+        ex=window_seconds,
+        nx=True,
+    )
+
+    if added:
+        return 1
+
+    return await redis.incr(key)
 
 
 async def reset_passcode_attempts(redis: Redis, email: str) -> None:
@@ -105,30 +128,20 @@ async def check_passcode_request_limit(
 ) -> None:
 
     email = email.strip().lower()
+    window = settings.PASSCODE_REQUEST_WINDOW_SECONDS
 
-    email_key = get_passcode_request_email_key(email)
-    ip_key = get_passcode_request_ip_key(client_ip)
-
-    email_count = await redis.incr(email_key)
-
-    if email_count == 1:
-        await redis.expire(
-            email_key,
-            settings.PASSCODE_REQUEST_WINDOW_SECONDS,
-        )
+    email_count = await _increment_with_window(
+        redis, get_passcode_request_email_key(email), window
+    )
 
     if email_count > settings.PASSCODE_REQUEST_EMAIL_LIMIT:
         raise TooManyRequestsException(
             message="Too many passcode requests. Please try again later.",
         )
 
-    ip_count = await redis.incr(ip_key)
-
-    if ip_count == 1:
-        await redis.expire(
-            ip_key,
-            settings.PASSCODE_REQUEST_WINDOW_SECONDS,
-        )
+    ip_count = await _increment_with_window(
+        redis, get_passcode_request_ip_key(client_ip), window
+    )
 
     if ip_count > settings.PASSCODE_REQUEST_IP_LIMIT:
         raise TooManyRequestsException(

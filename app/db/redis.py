@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from fastapi import Request
 from redis.asyncio import Redis
 
@@ -23,3 +25,20 @@ def create_redis() -> Redis:
 
 async def get_redis(request: Request) -> Redis:
     return request.app.state.redis
+
+
+def get_redis_uri() -> str:
+    if settings.REDIS_URL:
+        return settings.REDIS_URL
+
+    username = quote(settings.REDIS_USERNAME)
+
+    if settings.REDIS_PASSWORD:
+        password = quote(settings.REDIS_PASSWORD)
+        auth = f"{username}:{password}@"
+    else:
+        auth = f"{username}@"
+
+    return (
+        f"redis://{auth}{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
+    )

@@ -123,7 +123,7 @@ async def test_request_renews_missing_or_expired_access(auth_app, expired):
         cookie = cookies[settings.ACCESS_TOKEN_COOKIE_NAME]
         assert cookie["secure"] and cookie["httponly"]
 
-        assert cookie["samesite"] == "none" and cookie["path"] == "/"
+        assert cookie["samesite"] == "lax" and cookie["path"] == "/"
         assert cookie["max-age"] == str(settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60)
 
         assert settings.REFRESH_TOKEN_COOKIE_NAME not in response.cookies

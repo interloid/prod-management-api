@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -5,7 +6,7 @@ from arq import Retry
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.core.constants import ProductImageConstants
+from app.core.constants import CacheKeyConstants, EventType, ProductImageConstants
 from app.core.logging import get_logger
 from app.core.settings import settings
 from app.models.product_image_model import ProductImage
@@ -13,9 +14,12 @@ from app.repositories.product_image_repo import (
     ProductImageRepository,
 )
 from app.repositories.product_repo import ProductRepository
+from app.schemas.event import EventEnvelope
 from app.schemas.image_jobs_schema import (
     ProductImageUploadPayload,
 )
+from app.services.event_service import EventService
+from app.utils.cache_key import build_product_cache_key
 
 logger = get_logger(__name__)
 
@@ -52,7 +56,6 @@ def _extract_staging_object_keys(
         if isinstance(staging_key, str) and staging_key.startswith(expected_prefix):
             staging_object_keys.append(staging_key)
 
-    # Remove duplicates while preserving order.
     return list(dict.fromkeys(staging_object_keys))
 
 
@@ -79,7 +82,20 @@ async def upload_product_images(
     ctx: dict[str, Any],
     product_id: str,
     images: list[dict[str, Any]],
+    request_id: str,
 ) -> dict[str, Any]:
+
+    logger.info(
+        "upload_product_images START | product_id=%s | images=%s | request_id=%s",
+        product_id,
+        images,
+        request_id,
+    )
+
+    redis = ctx["redis"]
+
+    event_service = EventService(redis)
+
     if not images:
         return {
             "product_id": product_id,
@@ -90,6 +106,8 @@ async def upload_product_images(
     s3 = ctx["s3"]
 
     staging_object_keys: list[str] = []
+
+    product_uuid: UUID | None = None
 
     try:
         product_uuid = UUID(product_id)
@@ -103,8 +121,6 @@ async def upload_product_images(
             raise ValueError(
                 "Maximum product image limit exceeded",
             )
-
-        payload_images: list[ProductImageUploadPayload] = []
 
         payload_images = [
             ProductImageUploadPayload.model_validate(
@@ -357,7 +373,30 @@ async def upload_product_images(
                         await image_repo.set_primary(
                             image=selected_image,
                         )
+                await redis.delete(build_product_cache_key(id=product_uuid))
 
+                keys = await redis.smembers(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+
+                if keys:
+                    keys = [
+                        key.decode() if isinstance(key, bytes) else key for key in keys
+                    ]
+
+                    await redis.delete(*keys)
+
+                    await redis.delete(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
+
+        await event_service.publish(
+            EventEnvelope(
+                event=EventType.IMAGE_PROCESSED,
+                request_id=request_id,
+                timestamp=datetime.now(UTC),
+                data={
+                    "product_id": str(product_uuid),
+                    "image_ids": processed_image_ids,
+                },
+            ),
+        )
         return {
             "product_id": str(product_uuid),
             "uploaded": len(
@@ -401,11 +440,23 @@ async def upload_product_images(
             product_id,
             job_try,
         )
+        if product_uuid is not None:
+            await _cleanup_staging_objects(
+                s3=s3,
+                staging_object_keys=(staging_object_keys),
+            )
 
-        await _cleanup_staging_objects(
-            s3=s3,
-            staging_object_keys=(staging_object_keys),
-        )
+            await event_service.publish(
+                EventEnvelope(
+                    event=EventType.IMAGE_FAILED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product_uuid),
+                        "error": str(exc),
+                    },
+                ),
+            )
 
         raise
 
@@ -420,23 +471,48 @@ async def upload_product_images(
             product_id,
             exc,
         )
+        if product_uuid is not None:
+            await _cleanup_staging_objects(
+                s3=s3,
+                staging_object_keys=(staging_object_keys),
+            )
 
-        await _cleanup_staging_objects(
-            s3=s3,
-            staging_object_keys=(staging_object_keys),
-        )
+            await event_service.publish(
+                EventEnvelope(
+                    event=EventType.IMAGE_FAILED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product_uuid),
+                        "error": str(exc),
+                    },
+                ),
+            )
 
         raise
 
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Unexpected terminal product-image job failure | product_id=%s",
             product_id,
         )
 
-        await _cleanup_staging_objects(
-            s3=s3,
-            staging_object_keys=(staging_object_keys),
-        )
+        if product_uuid is not None:
+            await _cleanup_staging_objects(
+                s3=s3,
+                staging_object_keys=(staging_object_keys),
+            )
+
+            await event_service.publish(
+                EventEnvelope(
+                    event=EventType.IMAGE_FAILED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product_uuid),
+                        "error": str(exc),
+                    },
+                ),
+            )
 
         raise

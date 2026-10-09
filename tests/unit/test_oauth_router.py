@@ -64,7 +64,7 @@ async def test_callback_accepts_empty_data_and_sets_token_cookies(
         assert cookie.value == value
         assert cookie["httponly"]
         assert cookie["secure"]
-        assert cookie["samesite"] == "none"
+        assert cookie["samesite"] == "lax"
         assert cookie["path"] == "/"
         assert cookie["max-age"] == str(max_age)
     service.oauth_callback.assert_awaited_once_with(
@@ -73,8 +73,12 @@ async def test_callback_accepts_empty_data_and_sets_token_cookies(
 
 
 @pytest.mark.asyncio
-async def test_callback_failure_does_not_set_cookies_or_redirect(oauth_app):
+async def test_callback_failure_does_not_set_cookies_or_redirect(
+    oauth_app, monkeypatch
+):
+
     app, service = oauth_app
+    monkeypatch.setattr(settings, "YOUR_REACT_URL")
     service.oauth_callback.side_effect = UnauthorizedException(
         message="Invalid or expired OAuth state"
     )
@@ -88,7 +92,7 @@ async def test_callback_failure_does_not_set_cookies_or_redirect(oauth_app):
             follow_redirects=False,
         )
 
-    assert response.status_code == 401
-    assert response.json()["message"] == "Invalid or expired OAuth state"
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert "UNAUTHORIZED" in location
     assert "set-cookie" not in response.headers
-    assert "location" not in response.headers
