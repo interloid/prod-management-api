@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.core.constants import (
     EventType,
     ProductImageConstants,
+    ProductSortField,
     ProductStatusEnum,
 )
 from app.core.logging import get_logger
@@ -35,23 +36,21 @@ from app.services.base_service import BaseService
 from app.services.cache_service import CacheService
 from app.services.event_service import EventService
 from app.services.product_image_service import ProductImageService
-from app.utils.cache_key import build_product_cache_key
 
 logger = get_logger(__name__)
 
 
 class ProductService(BaseService[Product]):
     SORT_FIELDS = {
-        "name": Product.name,
-        "sku": Product.sku,
-        "category": Product.category_id,
-        "price": Product.price,
-        "stock": Product.stock,
-        "status": Product.status,
-        "updated": Product.updated_at,
+        ProductSortField.NAME: Product.name,
+        ProductSortField.SKU: Product.sku,
+        ProductSortField.CATEGORY: Product.category_id,
+        ProductSortField.PRICE: Product.price,
+        ProductSortField.STOCK: Product.stock,
+        ProductSortField.STATUS: Product.status,
+        ProductSortField.CREATED: Product.created_at,
+        ProductSortField.UPDATED: Product.updated_at,
     }
-
-    DEFAULT_SORT = "updated"
 
     def __init__(
         self,
@@ -362,7 +361,7 @@ class ProductService(BaseService[Product]):
         min_price: Decimal | None = None,
         max_price: Decimal | None = None,
         in_stock: bool | None = None,
-        sort_by: str = DEFAULT_SORT,
+        sort_by: str = ProductSortField.UPDATED,
         sort_order: str = "desc",
         page: int = 1,
         page_size: int = 10,
@@ -532,6 +531,8 @@ class ProductService(BaseService[Product]):
                     message="Product with this SKU already exists",
                 )
 
+        category_changed = False
+
         if "category_name" in updates:
             category_name = updates["category_name"].strip()
 
@@ -543,6 +544,9 @@ class ProductService(BaseService[Product]):
                 raise NotFoundException(
                     message="Category not found",
                 )
+
+            if product.category_id != category.id:
+                category_changed = True
 
             product.category_id = category.id
             del updates["category_name"]
@@ -635,25 +639,6 @@ class ProductService(BaseService[Product]):
 
             await self.db.commit()
 
-            await self.cache.invalidate_product_list_cache()
-
-            await self.cache.invalidate_product_cache(
-                id=product.id,
-            )
-
-            await self.cache.delete_keys(build_product_cache_key(id=product.id))
-
-            await self.event_service.publish(
-                EventEnvelope(
-                    event=EventType.PRODUCT_UPDATED,
-                    request_id=request_id,
-                    timestamp=datetime.now(UTC),
-                    data={
-                        "product_id": str(product.id),
-                    },
-                ),
-            )
-
         except IntegrityError as exc:
             await self.db.rollback()
             await self._cleanup_s3(staging_object_keys)
@@ -669,27 +654,59 @@ class ProductService(BaseService[Product]):
             await self._cleanup_s3(staging_object_keys)
             raise
 
+        await self.cache.invalidate_product_list_cache()
+        await self.cache.invalidate_product_cache(id=product.id)
+
+        if category_changed:
+            try:
+                await self.cache.invalidate_category_list_cache()
+            except Exception:
+                logger.exception(
+                    "Failed to invalidate category list cache | product_id=%s",
+                    product.id,
+                )
+
+        try:
+            await self.event_service.publish(
+                EventEnvelope(
+                    event=EventType.PRODUCT_UPDATED,
+                    request_id=request_id,
+                    timestamp=datetime.now(UTC),
+                    data={
+                        "product_id": str(product.id),
+                    },
+                ),
+            )
+        except Exception:
+            logger.exception(
+                "Failed to publish product-updated event | product_id=%s",
+                product.id,
+            )
+
         try:
             await self._enqueue_s3_cleanup(images_to_delete)
         except Exception:
             logger.exception("Failed to enqueue S3 cleanup after product update")
 
         if job_images:
-            job = await self.arq_pool.enqueue_job(
-                "upload_product_images",
-                str(product.id),
-                [image.model_dump(mode="json") for image in job_images],
-                request_id=str(request_id),
-                _expires=86_400,
-            )
-
-            if job is None:
-                logger.error(
-                    "Product image job was not queued | product_id=%s",
-                    product.id,
+            try:
+                job = await self.arq_pool.enqueue_job(
+                    "upload_product_images",
+                    str(product.id),
+                    [image.model_dump(mode="json") for image in job_images],
+                    request_id=str(request_id),
+                    _expires=86_400,
                 )
-                raise RuntimeError(
-                    "Product image processing could not be queued",
+
+                if job is None:
+                    logger.error(
+                        "Product image job was not queued | product_id=%s",
+                        product.id,
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue product-image job | product_id=%s",
+                    product.id,
                 )
 
         product = await self.product_repo.get_by_id(
@@ -733,8 +750,6 @@ class ProductService(BaseService[Product]):
         await self.cache.invalidate_product_cache(
             id=product.id,
         )
-
-        await self.cache.delete_keys(build_product_cache_key(id=product.id))
 
         await self.event_service.publish(
             EventEnvelope(

@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 
 from app.api.dependencies import get_auth_service
 from app.core.cookies import set_cookie
+from app.core.logging import get_logger
 from app.core.settings import settings
 from app.exceptions.base import AppException
 from app.exceptions.global_exception import AUTH_ERROR_RESPONSES
@@ -14,6 +15,8 @@ router = APIRouter(
     prefix="/auth",
     tags=["OAUTH"],
 )
+
+logger = get_logger(__name__)
 
 
 @router.get(
@@ -34,10 +37,7 @@ async def oauth(
     )
 
 
-@router.get(
-    "/{provider}/callback",
-    responses=AUTH_ERROR_RESPONSES,
-)
+@router.get("/{provider}/callback", responses=AUTH_ERROR_RESPONSES)
 async def oauth_callback(
     provider: str,
     state: str | None = None,
@@ -45,6 +45,10 @@ async def oauth_callback(
     error: str | None = None,
     service: AuthService = Depends(get_auth_service),
 ) -> RedirectResponse:
+    login_url = f"{settings.YOUR_REACT_URL}/login"
+
+    if error or not code or not state:
+        return RedirectResponse(f"{login_url}?error=oauth_denied", status_code=302)
 
     try:
         (
@@ -52,30 +56,20 @@ async def oauth_callback(
             access_token,
             raw_refresh_token,
             refresh_max_age,
-        ) = await service.oauth_callback(
-            provider=provider,
-            code=code,
-            state=state,
-        )
-
-        response = RedirectResponse(
-            url=settings.YOUR_REACT_URL,
-            status_code=302,
-        )
-
-        set_cookie(
-            response=response,
-            access_token=access_token,
-            raw_refresh_token=raw_refresh_token,
-            refresh_max_age=refresh_max_age,
-        )
-
-        return response
-
+        ) = await service.oauth_callback(provider=provider, code=code, state=state)
     except AppException as exc:
-        error_code = quote(exc.code)
-
         return RedirectResponse(
-            url=f"{settings.YOUR_REACT_URL}/login?error={error_code}",
-            status_code=302,
+            f"{login_url}?error={quote(exc.error_code)}", status_code=302
         )
+    except Exception:
+        logger.exception("OAuth callback failed | provider=%s", provider)
+        return RedirectResponse(f"{login_url}?error=oauth_failed", status_code=302)
+
+    response = RedirectResponse(url=settings.YOUR_REACT_URL, status_code=302)
+    set_cookie(
+        response=response,
+        access_token=access_token,
+        raw_refresh_token=raw_refresh_token,
+        refresh_max_age=refresh_max_age,
+    )
+    return response

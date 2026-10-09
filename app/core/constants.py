@@ -120,3 +120,14 @@ class EventType(StrEnum):
     PRODUCT_DELETED = "product.deleted"
     IMAGE_PROCESSED = "image.processed"
     IMAGE_FAILED = "image.failed"
+
+
+class ProductSortField(StrEnum):
+    NAME = "name"
+    SKU = "sku"
+    CATEGORY = "category"
+    PRICE = "price"
+    STOCK = "stock"
+    STATUS = "status"
+    CREATED = "created"
+    UPDATED = "updated"

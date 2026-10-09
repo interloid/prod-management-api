@@ -23,6 +23,7 @@ from app.core.constants import (
     CacheKeyConstants,
     PaginationEnum,
     PermissionEnum,
+    ProductSortField,
     ProductStatusEnum,
 )
 from app.core.logging import get_logger
@@ -54,13 +55,6 @@ router = APIRouter(
     tags=["Products"],
 )
 
-
-ProductSort = Literal[
-    "name",
-    "price",
-    "created",
-    "updated",
-]
 
 SortOrder = Literal[
     "asc",
@@ -230,7 +224,9 @@ async def list_products(
     in_stock: bool | None = Query(
         default=None,
     ),
-    sort: ProductSort = Query(default="updated"),
+    sort: ProductSortField = Query(
+        default=ProductSortField.UPDATED,
+    ),
     order: SortOrder = Query(default="desc"),
     page: int = Query(
         default=PaginationEnum.DEFAULT_PAGE,

@@ -19,6 +19,7 @@ from app.schemas.image_jobs_schema import (
     ProductImageUploadPayload,
 )
 from app.services.event_service import EventService
+from app.utils.cache_key import build_product_cache_key
 
 logger = get_logger(__name__)
 
@@ -372,11 +373,7 @@ async def upload_product_images(
                         await image_repo.set_primary(
                             image=selected_image,
                         )
-                product_cache_key = (
-                    f"{CacheKeyConstants.PRODUCT_CACHE_PREFIX}{product_uuid}"
-                )
-
-                await redis.delete(product_cache_key)
+                await redis.delete(build_product_cache_key(id=product_uuid))
 
                 keys = await redis.smembers(CacheKeyConstants.PRODUCT_LIST_CACHE_KEYS)
 
