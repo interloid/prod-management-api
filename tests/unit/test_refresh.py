@@ -55,6 +55,7 @@ def auth_app(monkeypatch):
     monkeypatch.setattr(UserRepository, "get_by_id", AsyncMock(return_value=user))
 
     app = FastAPI()
+    app.state.redis = AsyncMock()
 
     app.add_middleware(AuthCookieMiddleware)
     register_exception_handlers(app)

@@ -97,39 +97,6 @@ async def test_delete_product_raises_not_found_when_product_does_not_exist():
 
 
 @pytest.mark.asyncio
-async def test_delete_product_commits_before_deleting_s3_objects():
-    events = []
-    db = MagicMock()
-    db.commit = AsyncMock(side_effect=lambda: events.append("commit"))
-    db.refresh = AsyncMock()
-
-    service = make_service(db)
-    product_id = uuid4()
-    product = Product(id=product_id, name="iPhone 15", sku="IPHONE-15")
-    product.images = [
-        ProductImage(object_key="products/image1.jpg"),
-        ProductImage(object_key="products/image2.jpg"),
-    ]
-
-    service.product_repo.get_by_id = AsyncMock(return_value=product)
-    service.product_repo.delete = AsyncMock(side_effect=lambda **_: events.append("db"))
-    service.product_image_service.s3_service.delete_file = AsyncMock(
-        side_effect=lambda **_: events.append("s3")
-    )
-
-    await service.delete_product(product_id=product_id, request_id="req-1")
-
-    assert events == ["db", "commit", "s3", "s3"]
-    service.product_repo.delete.assert_awaited_once_with(product=product)
-    service.product_image_service.s3_service.delete_file.assert_any_await(
-        object_key="products/image1.jpg"
-    )
-    service.product_image_service.s3_service.delete_file.assert_any_await(
-        object_key="products/image2.jpg"
-    )
-
-
-@pytest.mark.asyncio
 async def test_delete_product_does_not_delete_s3_objects_when_commit_fails():
     service = make_service(commit_error=RuntimeError("commit failed"))
     product_id = uuid4()

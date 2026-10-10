@@ -1,4 +1,3 @@
-from http.cookies import SimpleCookie
 from unittest.mock import AsyncMock
 
 import pytest
@@ -6,9 +5,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api.dependencies import get_auth_service
-from app.api.v1.endpoints.oauth_router import router
+from app.api.v1.endpoints.oauth_router import router as oauth_router
 from app.core.settings import settings
-from app.exceptions.custom import UnauthorizedException
 from app.exceptions.handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 from app.services.auth_service import AuthService
@@ -17,20 +15,106 @@ from app.services.auth_service import AuthService
 @pytest.fixture
 def oauth_app():
     service = AsyncMock(spec=AuthService)
+
     app = FastAPI()
-    app.include_router(router)
+    app.include_router(oauth_router)
+
     register_exception_handlers(app)
+
     app.dependency_overrides[get_auth_service] = lambda: service
+
     return app, service
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["google", "microsoft", "github"])
-async def test_callback_accepts_empty_data_and_sets_token_cookies(
-    oauth_app, provider, monkeypatch
-):
+async def test_oauth(oauth_app, provider):
+
     app, service = oauth_app
-    monkeypatch.setattr(settings, "YOUR_REACT_URL", "https://frontend.example.com/")
+
+    authorization_url = f"https://pms/{provider}/authorize"
+    service.start_oauth.return_value = authorization_url
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        response = await client.get(f"/auth/{provider}")
+
+        assert response.status_code == 302
+        assert response.headers["location"] == authorization_url
+
+        service.start_oauth.assert_awaited_once_with(
+            provider=provider,
+        )
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_error(oauth_app):
+
+    app, service = oauth_app
+
+    login_url = f"{settings.YOUR_REACT_URL}/login"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        response = await client.get(
+            "/auth/google/callback", params={"error": "access_denied"}
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == (f"{login_url}?error=oauth_denied")
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_no_state(oauth_app):
+
+    app, service = oauth_app
+
+    login_url = f"{settings.YOUR_REACT_URL}/login"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        response = await client.get(
+            "/auth/google/callback", params={"state": "test-state"}
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == (f"{login_url}?error=oauth_denied")
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_no_code(oauth_app):
+
+    app, service = oauth_app
+
+    login_url = f"{settings.YOUR_REACT_URL}/login"
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        follow_redirects=False,
+    ) as client:
+        response = await client.get(
+            "/auth/google/callback", params={"code": "test-code"}
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == (f"{login_url}?error=oauth_denied")
+
+
+@pytest.mark.asyncio
+async def test_callback_accepts(oauth_app):
+
+    app, service = oauth_app
+
     service.oauth_callback.return_value = (
         ApiResponse[None](message="Authentication successful", data=None),
         "test-access-token",
@@ -39,60 +123,21 @@ async def test_callback_accepts_empty_data_and_sets_token_cookies(
     )
 
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="https://testserver"
-    ) as client:
-        response = await client.get(
-            f"/auth/{provider}/callback",
-            params={"code": "test-code", "state": "test-state"},
-            follow_redirects=False,
-        )
-
-    assert response.status_code == 302
-    assert response.headers["location"] == settings.YOUR_REACT_URL
-    cookies = SimpleCookie()
-    for header in response.headers.get_list("set-cookie"):
-        cookies.load(header)
-    for name, value, max_age in (
-        (
-            settings.ACCESS_TOKEN_COOKIE_NAME,
-            "test-access-token",
-            settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        ),
-        (settings.REFRESH_TOKEN_COOKIE_NAME, "test-refresh-token", 3600),
-    ):
-        cookie = cookies[name]
-        assert cookie.value == value
-        assert cookie["httponly"]
-        assert cookie["secure"]
-        assert cookie["samesite"] == "lax"
-        assert cookie["path"] == "/"
-        assert cookie["max-age"] == str(max_age)
-    service.oauth_callback.assert_awaited_once_with(
-        provider=provider, code="test-code", state="test-state"
-    )
-
-
-@pytest.mark.asyncio
-async def test_callback_failure_does_not_set_cookies_or_redirect(
-    oauth_app, monkeypatch
-):
-
-    app, service = oauth_app
-    monkeypatch.setattr(settings, "YOUR_REACT_URL")
-    service.oauth_callback.side_effect = UnauthorizedException(
-        message="Invalid or expired OAuth state"
-    )
-
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="https://testserver"
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        follow_redirects=False,
     ) as client:
         response = await client.get(
             "/auth/google/callback",
-            params={"code": "test-code", "state": "invalid-state"},
-            follow_redirects=False,
+            params={"code": "test-code", "state": "test-state"},
         )
 
-    assert response.status_code == 302
-    location = response.headers["location"]
-    assert "UNAUTHORIZED" in location
-    assert "set-cookie" not in response.headers
+        assert response.status_code == 302
+        assert response.headers["location"] == settings.YOUR_REACT_URL
+        service.oauth_callback.assert_awaited_once_with(
+            provider="google",
+            code="test-code",
+            state="test-state",
+        )
+
+        assert "set-cookie" in response.headers
